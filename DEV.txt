@@ -1,0 +1,50 @@
+Repository
+  |
+  |
+  *--> Storage
+          |
+          |
+          *--> StorageObject
+                  |
+                  |
+                  *--> ActionObject
+                          |
+                          |
+                          *--> T: impl ActionExt
+
+Example usage
+
+fn main() -> .. {
+  // Repository contains all the needed repository
+  // information
+  let repository = Repository::init(..)?;
+
+  // Init storage_a
+  let storage_a: Storage<A,B> = Storage::init(&repository)?;
+
+  // Init storage_b
+  let storage_b: Storage<C,D> = Storage::init(&repository)?;
+
+  // Run repository
+  repository.run();
+
+  let data = AppData(storage_a, storage_b)?;
+  ...
+}
+
+impl AppData {
+  pub fn demo(&self) -> .. {
+    let data = self.data.lock()?;
+    let res = data.storage_a.filter(|i| i.name().contains("Peti"));
+    display(res)?;
+    ..
+  }
+
+  pub fn demo2(&self) -> .. {
+    let data = self.data.lock()?;
+    let object_id = ..;
+    let res = data.storage_a.patch(object_id, DemoAction::UpdateObject{age: 34})?;
+    display(res)?;
+    ..
+  }
+}
