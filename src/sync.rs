@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::prelude::sha1_signature;
+
 pub trait ActionExt {
   /// Action can work with this
   /// type
@@ -107,19 +109,38 @@ impl<
   pub fn data_object(&self) -> &T {
     &self.object
   }
-  pub fn patch(&self, action: A) -> Result<ActionObject<T, A>, String> {
-    let result = action.apply_patch(self)?;
+  fn last_local_action_id(&self) -> Option<Uuid> {
+    self.local.last().map(|i| i.id)
+  }
+  fn last_remote_action_id(&self) -> Option<Uuid> {
+    self.remote.last().map(|i| i.id)
+  }
+  pub fn create_local_action_object(
+    &self,
+    action: A,
+    uid: String,
+  ) -> Result<ActionObject<T, A>, String> {
+    let patched_data = action.apply_patch(self)?;
     let res = ActionObject {
       id: Uuid::new_v4(),
       object_id: self.id.clone(),
-      uid: todo!(),
+      uid,
       dtime: Utc::now(),
       commit_id: None,
-      parent_action_id: todo!(),
+      parent_action_id: self.last_local_action_id(),
       action: ActionKind::Patch(action),
-      signature: todo!(),
+      signature: sha1_signature(&patched_data)?,
     };
     Ok(res)
+  }
+  pub fn add_remote_action_object(
+    &mut self,
+    action_object: ActionObject<T, A>,
+  ) -> Result<(), String> {
+    if self.last_remote_action_id() != action_object.parent_action_id {
+      return Err("Storage is not up to date. ActionObject parent is not the last at remote list".into());
+    }
+    unimplemented!()
   }
 }
 
