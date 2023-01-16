@@ -1,15 +1,15 @@
 [package]
+edition = "2021"
 name = "Storage"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = {version="*", features=["serde"]}
-schemars = { version = "0.8.11", features = ["chrono"] }
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
-uuid = {version="*", features=["v4"]}
-sha1 = "*"
+chrono = {version = "*", features = ["serde"]}
 hex-literal = "*"
+schemars = {version = "0.8.11", features = ["chrono"]}
+serde = {version = "*", features = ["derive"]}
+serde_json = "*"
+sha1 = "*"
+uuid = {version = "*", features = ["v4", "serde"]}

@@ -6,7 +6,36 @@ use uuid::Uuid;
 
 use crate::prelude::sha1_signature;
 
-pub trait ActionExt {
+pub trait InitActionObject<A: ActionExt> {
+  fn create_init_action_object(
+    &self,
+    commit: &Commit,
+  ) -> Result<ActionObject<Self, A>, String>
+  where
+    Self: Clone + Serialize + for<'de> Deserialize<'de>,
+  {
+    let res = ActionObject {
+      id: Uuid::new_v4(),
+      object_id: Uuid::new_v4(),
+      uid: commit.uid.clone(),
+      dtime: Utc::now(),
+      commit_id: Some(commit.id),
+      parent_action_id: None,
+      action: ActionKind::Create((*self).clone()),
+      object_signature: sha1_signature(&self)?,
+      remote_signature: None,
+    };
+    Ok(res)
+  }
+}
+
+// Auto implement InitActionObject trait
+impl<A: ActionExt, T> InitActionObject<A> for T where
+  T: Serialize + Clone + for<'de> Deserialize<'de>
+{
+}
+
+pub trait ActionExt: Serialize + for<'de> Deserialize<'de> {
   /// Action can work with this
   /// type
   type ObjectType;
@@ -22,21 +51,20 @@ pub trait ActionExt {
 /// Generic acion representation
 /// Atomic action kinds with the following states:
 /// Create, Patch, Remove, Recover
-enum ActionKind<T, A: ActionExt> {
+#[derive(Serialize, Clone)]
+enum ActionKind<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt> {
   /// Create a new object with the given
   /// initial T values (No default as default)
   Create(T),
   /// Patch object with action A
   Patch(A),
-  /// Logical delete
-  Remove,
-  /// Recover deleted Object
-  Recover,
 }
 
 /// ActionObject must be produced by a StorageObject
 /// By providing a &Commit and an A: impl ActionExt to it.
-pub struct ActionObject<T, A: ActionExt> {
+#[derive(Serialize, Clone)]
+pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
+{
   id: Uuid,
   object_id: Uuid,
   uid: String,
@@ -44,7 +72,48 @@ pub struct ActionObject<T, A: ActionExt> {
   commit_id: Option<Uuid>,
   parent_action_id: Option<Uuid>,
   action: ActionKind<T, A>,
-  signature: String,
+  object_signature: String,
+  remote_signature: Option<String>,
+}
+
+impl<T: Serialize + for<'de> Deserialize<'de> + Clone, A: ActionExt + Clone>
+  ActionObject<T, A>
+{
+  // Check if local action_object
+  fn is_local(&self) -> bool {
+    self.remote_signature.is_none()
+  }
+  // Check if remote action_object
+  fn is_remote(&self) -> bool {
+    self.remote_signature.is_some()
+  }
+  // Check if patch
+  fn is_kind_patch(&self) -> bool {
+    if let ActionKind::Patch(_) = self.action {
+      return true;
+    }
+    false
+  }
+  // Check if create
+  fn is_kind_create(&self) -> bool {
+    if let ActionKind::Create(_) = self.action {
+      return true;
+    }
+    false
+  }
+  // Check if remote signature correct
+  fn has_valid_remote_signature(&self) -> Result<bool, String> {
+    if let Some(remote_signature) = &self.remote_signature {
+      let self_clone = (*self).clone();
+      let without_signature: ActionObject<T, A> = ActionObject {
+        remote_signature: None,
+        ..self_clone
+      };
+      let signature = sha1_signature(&without_signature)?;
+      return Ok(&signature == remote_signature);
+    }
+    Ok(false)
+  }
 }
 
 pub struct CommitRef<
@@ -75,10 +144,8 @@ pub struct StorageObject<
   A: ActionExt<ObjectType = T>,
 > {
   id: Uuid,
-  local: Vec<ActionObject<T, A>>,
-  remote: Vec<ActionObject<T, A>>,
+  actions: Vec<ActionObject<T, A>>,
   object: T,
-  removed: bool,
   created: DateTime<Utc>,
 }
 
@@ -100,47 +167,50 @@ impl<
     A: ActionExt<ObjectType = T>,
   > StorageObject<T, A>
 {
-  pub fn is_active(&self) -> bool {
-    !self.removed
-  }
-  pub fn is_removed(&self) -> bool {
-    self.removed
-  }
   pub fn data_object(&self) -> &T {
     &self.object
   }
-  fn last_local_action_id(&self) -> Option<Uuid> {
-    self.local.last().map(|i| i.id)
-  }
-  fn last_remote_action_id(&self) -> Option<Uuid> {
-    self.remote.last().map(|i| i.id)
-  }
-  pub fn create_local_action_object(
+  fn create_action_object(
     &self,
-    action: A,
+    action: ActionKind<T, A>,
     uid: String,
+    commit_id: Uuid,
   ) -> Result<ActionObject<T, A>, String> {
-    let patched_data = action.apply_patch(self)?;
+    let object_signature = match &action {
+      ActionKind::Create(t) => sha1_signature(t)?,
+      ActionKind::Patch(t) => sha1_signature(&t.apply_patch(self)?)?,
+    };
     let res = ActionObject {
       id: Uuid::new_v4(),
       object_id: self.id.clone(),
       uid,
       dtime: Utc::now(),
-      commit_id: None,
-      parent_action_id: self.last_local_action_id(),
-      action: ActionKind::Patch(action),
-      signature: sha1_signature(&patched_data)?,
+      commit_id: Some(commit_id),
+      parent_action_id: self.actions.last().map(|i| i.id),
+      action,
+      object_signature,
+      remote_signature: None,
     };
     Ok(res)
   }
-  pub fn add_remote_action_object(
-    &mut self,
-    action_object: ActionObject<T, A>,
-  ) -> Result<(), String> {
-    if self.last_remote_action_id() != action_object.parent_action_id {
-      return Err("Storage is not up to date. ActionObject parent is not the last at remote list".into());
+  fn patch(&mut self, action_object: ActionObject<T, A>) -> Result<&T, String> {
+    if let ActionKind::Patch(action) = &action_object.action {
+      // Patch T
+      let patched_object = action.apply_patch(&self)?;
+      // Check signature
+      if &action_object.object_signature
+        != &crate::prelude::sha1_signature(&patched_object)?
+      {
+        return Err("Patch signature error!".into());
+      }
+      // Replace T with the patched one
+      self.object = patched_object;
+      // Insert action object
+      self.actions.push(action_object);
+      // Return patched data as ref
+      return Ok(&self.object);
     }
-    unimplemented!()
+    Err("Patch must have Patch action kind!".into())
   }
 }
 
@@ -190,7 +260,7 @@ impl<
     self
       .members
       .iter()
-      .filter(|i| i.is_active() && filter_fn(i.data_object()))
+      .filter(|i| filter_fn(i.data_object()))
       .collect()
   }
   pub fn filter_all(
@@ -247,3 +317,45 @@ impl Repository {
     unimplemented!()
   }
 }
+
+// enum ActionA {}
+
+// impl ActionExt for ActionA {
+//   type ObjectType = i32;
+
+//   fn apply_patch(
+//     &self,
+//     object: &Self::ObjectType,
+//   ) -> Result<Self::ObjectType, String> {
+//     todo!()
+//   }
+// }
+
+// enum ActionB {}
+
+// impl ActionExt for ActionB {
+//   type ObjectType = String;
+
+//   fn apply_patch(
+//     &self,
+//     object: &Self::ObjectType,
+//   ) -> Result<Self::ObjectType, String> {
+//     todo!()
+//   }
+// }
+
+// enum RepositoryAction {
+//   A(ActionA),
+//   B(ActionB),
+// }
+
+// impl ActionExt for RepositoryAction {
+//     type ObjectType;
+
+//     fn apply_patch(
+//     &self,
+//     object: &Self::ObjectType,
+//   ) -> Result<Self::ObjectType, String> {
+//         todo!()
+//     }
+// }
