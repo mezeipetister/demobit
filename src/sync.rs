@@ -76,8 +76,10 @@ pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
   remote_signature: Option<String>,
 }
 
-impl<T: Serialize + for<'de> Deserialize<'de> + Clone, A: ActionExt + Clone>
-  ActionObject<T, A>
+impl<
+    T: Serialize + for<'de> Deserialize<'de> + Clone + Debug,
+    A: ActionExt + Clone,
+  > ActionObject<T, A>
 {
   // Check if local action_object
   fn is_local(&self) -> bool {
@@ -164,11 +166,30 @@ impl<
 
 impl<
     T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T>,
+    A: ActionExt<ObjectType = T> + Clone,
   > StorageObject<T, A>
 {
   pub fn data_object(&self) -> &T {
     &self.object
+  }
+  fn build_object(&mut self) -> Result<(), String> {
+    for action_object in &self.actions {
+      match &action_object.action {
+        ActionKind::Create(init_data) => self.object = init_data.to_owned(),
+        ActionKind::Patch(action) => {
+          let patched_data = action.apply_patch(&self.object)?;
+          self.object = patched_data;
+        }
+      }
+    }
+    Ok(())
+  }
+  pub fn clear_local_changes(&mut self) -> Result<(), String> {
+    // Clear all local actions
+    self.actions.retain(|a| a.is_remote());
+    // Build object from the beginning
+    self.build_object()?;
+    Ok(())
   }
   fn create_action_object(
     &self,
@@ -212,6 +233,12 @@ impl<
     }
     Err("Patch must have Patch action kind!".into())
   }
+  fn is_local_object(&self) -> bool {
+    if let Some(ao) = self.actions.first() {
+      return ao.is_local();
+    }
+    true
+  }
 }
 
 /// Generic Storage that can hold Vec<T>
@@ -226,7 +253,7 @@ pub struct Storage<
 
 impl<
     T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T>,
+    A: ActionExt<ObjectType = T> + Clone,
   > Storage<T, A>
 {
   /// Init a storage by providing a repository object
@@ -241,11 +268,15 @@ impl<
   ) -> Result<StorageObject<T, A>, String> {
     unimplemented!()
   }
-  pub fn remove_object(&self, object_id: Uuid) -> Result<(), String> {
-    unimplemented!()
-  }
-  pub fn restore_object(&self, object_id: Uuid) -> Result<(), String> {
-    unimplemented!()
+  pub fn clear_local_changes(&mut self) -> Result<(), String> {
+    // Clear all local changes
+    for object in &mut self.members {
+      // Remove local object
+      //! todo
+      // Clear object local changes
+      object.clear_local_changes()?;
+    }
+    Ok(())
   }
   pub fn apply_patch(
     &self,
@@ -317,45 +348,3 @@ impl Repository {
     unimplemented!()
   }
 }
-
-// enum ActionA {}
-
-// impl ActionExt for ActionA {
-//   type ObjectType = i32;
-
-//   fn apply_patch(
-//     &self,
-//     object: &Self::ObjectType,
-//   ) -> Result<Self::ObjectType, String> {
-//     todo!()
-//   }
-// }
-
-// enum ActionB {}
-
-// impl ActionExt for ActionB {
-//   type ObjectType = String;
-
-//   fn apply_patch(
-//     &self,
-//     object: &Self::ObjectType,
-//   ) -> Result<Self::ObjectType, String> {
-//     todo!()
-//   }
-// }
-
-// enum RepositoryAction {
-//   A(ActionA),
-//   B(ActionB),
-// }
-
-// impl ActionExt for RepositoryAction {
-//     type ObjectType;
-
-//     fn apply_patch(
-//     &self,
-//     object: &Self::ObjectType,
-//   ) -> Result<Self::ObjectType, String> {
-//         todo!()
-//     }
-// }
