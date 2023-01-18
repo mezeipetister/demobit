@@ -61,6 +61,8 @@ pub trait ActionExt: Serialize + for<'de> Deserialize<'de> {
   fn apply_patch(
     &self,
     object: &Self::ObjectType,
+    dtime: DateTime<Utc>,
+    uid: &str,
   ) -> Result<Self::ObjectType, String>;
 }
 
@@ -222,7 +224,11 @@ impl<
     for action_object in &mut self.local_actions {
       if let ActionKind::Patch(action) = &action_object.action {
         // Create patched data
-        let patched_data = action.apply_patch(&self.local_object)?;
+        let patched_data = action.apply_patch(
+          &self.local_object,
+          action_object.dtime,
+          &action_object.uid,
+        )?;
         // Calculate new signature
         let signature = sha1_signature(&patched_data)?;
         // Set new signature
@@ -243,15 +249,20 @@ impl<
     commit: &Commit,
     action: ActionKind<T, A>,
   ) -> Result<ActionObject<T, A>, String> {
+    let dtime = Utc::now();
     let object_signature = match &action {
       ActionKind::Create(t) => sha1_signature(t)?,
-      ActionKind::Patch(t) => sha1_signature(&t.apply_patch(self)?)?,
+      ActionKind::Patch(t) => sha1_signature(&t.apply_patch(
+        &self.local_object,
+        dtime,
+        &commit.uid,
+      )?)?,
     };
     let res = ActionObject {
       id: Uuid::new_v4(),
       object_id: self.id.clone(),
       uid: ctx.uid.to_owned(),
-      dtime: Utc::now(),
+      dtime,
       commit_id: Some(commit.id),
       parent_action_id: self.local_actions.last().map(|i| i.id),
       action,
@@ -282,7 +293,11 @@ impl<
         return Err("Local patch error. Parent id is wrong".into());
       }
       // Patch T
-      let patched_object = action.apply_patch(&self.local_object)?;
+      let patched_object = action.apply_patch(
+        &self.local_object,
+        action_object.dtime,
+        &action_object.uid,
+      )?;
       // Check signature
       if &action_object.object_signature
         != &crate::prelude::sha1_signature(&patched_object)?
@@ -324,8 +339,11 @@ impl<
     // ActionKind::Create(T) should be managed at storage level
     if let ActionKind::Patch(action) = &action_object.action {
       // Patch T
-      let patched_object =
-        action.apply_patch(self.remote_object.as_ref().unwrap())?;
+      let patched_object = action.apply_patch(
+        self.remote_object.as_ref().unwrap(),
+        action_object.dtime,
+        &action_object.uid,
+      )?;
       // Check signature
       if &action_object.object_signature
         != &crate::prelude::sha1_signature(&patched_object)?
