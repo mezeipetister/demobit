@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Deref};
+use std::{fmt::Debug, ops::Deref, path::PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,22 @@ impl<A: ActionExt, T> InitActionObject<A> for T where
 {
 }
 
+/// Storage Context
+/// containing operational details
+/// such as db root path or uid
+pub struct Context {
+  db_root_path: PathBuf,
+  uid: String,
+}
+
+impl Context {
+  pub fn new(db_root_path: PathBuf, uid: String) -> Self {
+    Self { db_root_path, uid }
+  }
+}
+
+/// Action trait for Actionable types
+/// Implemented types can be used as storage patch objects.
 pub trait ActionExt: Serialize + for<'de> Deserialize<'de> {
   /// Action can work with this
   /// type
@@ -65,14 +81,27 @@ enum ActionKind<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt> {
 #[derive(Serialize, Clone)]
 pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
 {
+  // Unique ID
   id: Uuid,
+  // Referred ObjectId
+  // must be applied on it
   object_id: Uuid,
+  // UserID
   uid: String,
+  // Applied date and time in Utc
   dtime: DateTime<Utc>,
+  // Related commit id
   commit_id: Option<Uuid>,
+  // Object actions parent action id //todo! maybe we should remove it?
   parent_action_id: Option<Uuid>,
+  // Create(T) or Patch(A)
   action: ActionKind<T, A>,
+  // Signature of the initial/patched object as json string
+  // Sha1
   object_signature: String,
+  // Remote action object signature
+  // serialized (ActionObject as json) with none remote_signature
+  // Sha1
   remote_signature: Option<String>,
 }
 
@@ -118,15 +147,6 @@ impl<
   }
 }
 
-pub struct CommitRef<
-  T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-  A: ActionExt<ObjectType = T>,
-> {
-  id: Uuid,
-  local_ancestor_id: Uuid,
-  actions: Vec<ActionObject<T, A>>,
-}
-
 pub struct Commit {
   id: Uuid,
   uid: String,
@@ -145,10 +165,16 @@ pub struct StorageObject<
   T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
   A: ActionExt<ObjectType = T>,
 > {
+  // Storage Object unique ID
   id: Uuid,
-  actions: Vec<ActionObject<T, A>>,
-  object: T,
-  created: DateTime<Utc>,
+  // Remote actions
+  remote_actions: Vec<ActionObject<T, A>>,
+  // Local actions
+  local_actions: Vec<ActionObject<T, A>>,
+  // Latest remote object
+  remote_object: Option<T>,
+  // Latest local object
+  local_object: T,
 }
 
 /// Implementing deref for StorageObject<T, A>
@@ -160,7 +186,7 @@ impl<
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    &self.object
+    &self.local_object
   }
 }
 
@@ -169,33 +195,24 @@ impl<
     A: ActionExt<ObjectType = T> + Clone,
   > StorageObject<T, A>
 {
-  pub fn data_object(&self) -> &T {
-    &self.object
-  }
-  fn build_object(&mut self) -> Result<(), String> {
-    for action_object in &self.actions {
-      match &action_object.action {
-        ActionKind::Create(init_data) => self.object = init_data.to_owned(),
-        ActionKind::Patch(action) => {
-          let patched_data = action.apply_patch(&self.object)?;
-          self.object = patched_data;
-        }
-      }
-    }
-    Ok(())
-  }
+  // Clear all local changes
+  // If object is local (no remote actions and object state)
+  // we should not be here. That object should be removed without
+  // clearing it.
   pub fn clear_local_changes(&mut self) -> Result<(), String> {
     // Clear all local actions
-    self.actions.retain(|a| a.is_remote());
-    // Build object from the beginning
-    self.build_object()?;
+    self.local_actions.clear();
+    // Set local data object to the remote one
+    self.local_object = self.remote_object.to_owned().unwrap();
     Ok(())
   }
+  // Create action object by providing a Context, Commit and Action object.
+  // If Patch returns error, we return it back to the caller
   fn create_action_object(
     &self,
+    ctx: &Context,
+    commit: &Commit,
     action: ActionKind<T, A>,
-    uid: String,
-    commit_id: Uuid,
   ) -> Result<ActionObject<T, A>, String> {
     let object_signature = match &action {
       ActionKind::Create(t) => sha1_signature(t)?,
@@ -204,40 +221,103 @@ impl<
     let res = ActionObject {
       id: Uuid::new_v4(),
       object_id: self.id.clone(),
-      uid,
+      uid: ctx.uid.to_owned(),
       dtime: Utc::now(),
-      commit_id: Some(commit_id),
-      parent_action_id: self.actions.last().map(|i| i.id),
+      commit_id: Some(commit.id),
+      parent_action_id: self.local_actions.last().map(|i| i.id),
       action,
       object_signature,
       remote_signature: None,
     };
     Ok(res)
   }
-  fn patch(&mut self, action_object: ActionObject<T, A>) -> Result<&T, String> {
+  // Add local action object to Storage Object
+  fn add_local_action_object(
+    &mut self,
+    action_object: ActionObject<T, A>,
+  ) -> Result<&T, String> {
+    // Check if action object is local
+    if action_object.is_remote() {
+      return Err(
+        "Only local action object allowed to be added as local".into(),
+      );
+    }
+    // Check if action object is a patch one
+    // ActionKind::Create(T) should be handled at storage level
     if let ActionKind::Patch(action) = &action_object.action {
+      // Check parent id
+      // This way it works for when no local_actions and parent id must be None
+      if action_object.parent_action_id
+        != self.local_actions.last().map(|i| i.id)
+      {
+        return Err("Local patch error. Parent id is wrong".into());
+      }
       // Patch T
-      let patched_object = action.apply_patch(&self)?;
+      let patched_object = action.apply_patch(&self.local_object)?;
       // Check signature
       if &action_object.object_signature
         != &crate::prelude::sha1_signature(&patched_object)?
       {
-        return Err("Patch signature error!".into());
+        return Err("Local patch signature error!".into());
       }
       // Replace T with the patched one
-      self.object = patched_object;
+      self.local_object = patched_object;
       // Insert action object
-      self.actions.push(action_object);
+      self.local_actions.push(action_object);
       // Return patched data as ref
-      return Ok(&self.object);
+      return Ok(&self.local_object);
     }
     Err("Patch must have Patch action kind!".into())
   }
-  fn is_local_object(&self) -> bool {
-    if let Some(ao) = self.actions.first() {
-      return ao.is_local();
+  // Add remote action object to Storage Object
+  // because of pull operation
+  fn add_remote_action_object(
+    &mut self,
+    action_object: ActionObject<T, A>,
+  ) -> Result<&T, String> {
+    // Check if action object is a remote one
+    if !action_object.is_remote() {
+      return Err("Only remote action object can be added here".into());
     }
-    true
+    // Check action object parent id
+    if self.remote_actions.last().map(|i| i.id)
+      != action_object.parent_action_id
+    {
+      return Err("Action Object parent id mismatch".into());
+    }
+    // Check if storage object is a remote one
+    if self.remote_object.is_none() {
+      return Err(
+        "We cannot add remote action object to local storage object".into(),
+      );
+    }
+    // Only ActionKind::Patch(A) can be managed here
+    // ActionKind::Create(T) should be managed at storage level
+    if let ActionKind::Patch(action) = &action_object.action {
+      // Patch T
+      let patched_object =
+        action.apply_patch(self.remote_object.as_ref().unwrap())?;
+      // Check signature
+      if &action_object.object_signature
+        != &crate::prelude::sha1_signature(&patched_object)?
+      {
+        return Err("Remote Patch signature error!".into());
+      }
+      // Check remote signature
+      // todo! we should verify
+      if action_object.remote_signature.is_none() {
+        return Err("Patch remote signature missing!".into());
+      }
+      // Replace T with the patched one
+      self.remote_object = Some(patched_object);
+      // Insert action object
+      self.remote_actions.push(action_object);
+      // Return current local object
+      // Important! We return LOCAL, as its the latest version of our
+      // data object.
+      return Ok(&self.local_object);
+    }
+    Err("Patch must have Patch action kind!".into())
   }
 }
 
@@ -248,7 +328,6 @@ pub struct Storage<
   A: ActionExt<ObjectType = T>,
 > {
   members: Vec<StorageObject<T, A>>,
-  commit_ref: CommitRef<T, A>,
 }
 
 impl<
@@ -291,7 +370,7 @@ impl<
     self
       .members
       .iter()
-      .filter(|i| filter_fn(i.data_object()))
+      .filter(|i| filter_fn(&i.local_object))
       .collect()
   }
   pub fn filter_all(
@@ -301,7 +380,7 @@ impl<
     self
       .members
       .iter()
-      .filter(|i| filter_fn(i.data_object()))
+      .filter(|i| filter_fn(&i.local_object))
       .collect()
   }
 }
@@ -339,8 +418,7 @@ impl Mode {
 
 pub struct Repository {
   mode: Mode,
-  local_commits: Vec<Commit>,
-  remote_commits: Vec<Commit>,
+  commits: Vec<Commit>,
 }
 
 impl Repository {

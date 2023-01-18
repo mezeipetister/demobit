@@ -48,3 +48,8 @@ impl AppData {
     ..
   }
 }
+
+---
+
+
+(Commit + Action) -> ActionObject (Local) -> StorageObject -> Storage
