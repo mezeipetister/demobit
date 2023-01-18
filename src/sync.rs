@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fmt::Debug, ops::Deref, path::PathBuf};
+use std::{
+  collections::HashMap, fmt::Debug, ops::Deref, path::PathBuf, sync::Mutex,
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -393,7 +395,27 @@ impl<
   fn get_by_id(&self, id: Uuid) -> Result<ActionObject<T, A>, String> {
     unimplemented!()
   }
-  pub fn apply_action_object(
+  // Create new object storage
+  // as local change
+  pub fn insert_new_object(
+    &self,
+    ctx: &Context,
+    commit: &mut Commit,
+    object: T,
+  ) -> Result<&T, String> {
+    unimplemented!()
+  }
+  // Local patch storage object
+  pub fn local_patch(
+    &self,
+    ctx: &Context,
+    commit: &mut Commit,
+    object_id: Uuid,
+    action: A,
+  ) -> Result<&T, String> {
+    unimplemented!()
+  }
+  fn apply_local_action_object(
     &self,
     action_object: ActionObject<T, A>,
   ) -> Result<StorageObject<T, A>, String> {
@@ -422,6 +444,13 @@ impl<
       .iter()
       .filter(|i| filter_fn(&i.local_object))
       .collect()
+  }
+  // Add remote action object
+  // e.g. by watch or manual pull
+  pub fn add_remote_action_object_json(
+    aob_json_str: &str,
+  ) -> Result<(), String> {
+    unimplemented!()
   }
 }
 
@@ -483,10 +512,15 @@ impl RepoDetails {
   fn init(mode: Mode, remote_url: Option<String>) -> Self {}
 }
 
-pub struct Repository {
+pub trait StorageFinder {
+  fn get(&self, id: &str) -> Result<Storage, String>;
+}
+
+pub struct Repository<T: StorageFinder> {
   ctx: Context,
   commits: CommitLog,
   repo_details: RepoDetails,
+  data: Mutex<T>,
 }
 
 impl Repository {
