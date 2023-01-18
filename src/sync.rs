@@ -145,6 +145,11 @@ impl<
     }
     Ok(false)
   }
+  // Reset dtime
+  // Should apply only when remote update occurs
+  fn reset_dtime(&mut self) {
+    self.dtime = Utc::now();
+  }
 }
 
 pub struct Commit {
@@ -204,6 +209,30 @@ impl<
     self.local_actions.clear();
     // Set local data object to the remote one
     self.local_object = self.remote_object.to_owned().unwrap();
+    Ok(())
+  }
+  // Rebuild local objects
+  // Only should use when remote update occurs
+  fn rebuild_local_objects(&mut self) -> Result<(), String> {
+    // First set local object if we have remote on
+    if let Some(remote_object) = &self.remote_object {
+      self.local_object = remote_object.to_owned();
+    }
+    // Re apply action objects and update their object signature & dtimes
+    for action_object in &mut self.local_actions {
+      if let ActionKind::Patch(action) = &action_object.action {
+        // Create patched data
+        let patched_data = action.apply_patch(&self.local_object)?;
+        // Calculate new signature
+        let signature = sha1_signature(&patched_data)?;
+        // Set new signature
+        action_object.object_signature = signature;
+        // Reset dtimes
+        action_object.reset_dtime();
+        // set local object to patched data
+        self.local_object = patched_data;
+      }
+    }
     Ok(())
   }
   // Create action object by providing a Context, Commit and Action object.
@@ -312,6 +341,8 @@ impl<
       self.remote_object = Some(patched_object);
       // Insert action object
       self.remote_actions.push(action_object);
+      // Rebuild local action objects
+      self.rebuild_local_objects()?;
       // Return current local object
       // Important! We return LOCAL, as its the latest version of our
       // data object.
