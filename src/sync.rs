@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Deref, path::PathBuf};
+use std::{collections::HashMap, fmt::Debug, ops::Deref, path::PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -163,11 +163,6 @@ pub struct Commit {
   serialized_actions: Vec<String>, // Action JSONs in Vec
 }
 
-pub struct CommitLog {
-  remote: Vec<Commit>,
-  local: Vec<Commit>,
-}
-
 pub struct StorageObject<
   T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
   A: ActionExt<ObjectType = T>,
@@ -219,6 +214,8 @@ impl<
     // First set local object if we have remote on
     if let Some(remote_object) = &self.remote_object {
       self.local_object = remote_object.to_owned();
+    } else {
+      return Err("Only remote object can be rebuild".into());
     }
     // Re apply action objects and update their object signature & dtimes
     for action_object in &mut self.local_actions {
@@ -376,7 +373,10 @@ pub struct Storage<
   T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
   A: ActionExt<ObjectType = T>,
 > {
-  members: Vec<StorageObject<T, A>>,
+  id: String,
+  members: Vec<Uuid>,
+  // members: Vec<StorageObject<T, A>>,
+  last_remote_commit_id: Option<Uuid>,
 }
 
 impl<
@@ -387,30 +387,21 @@ impl<
   /// Init a storage by providing a repository object
   /// Based on its data it can pull itself, or init itself
   /// as a local repository with initial data
-  pub fn init(repository: &Repository) -> Result<Self, String> {
+  pub fn init(id: String) -> Result<Self, String> {
     unimplemented!()
   }
-  pub fn create_object(
-    &self,
-    init_object: T,
-  ) -> Result<StorageObject<T, A>, String> {
+  fn get_by_id(&self, id: Uuid) -> Result<ActionObject<T, A>, String> {
     unimplemented!()
   }
-  pub fn clear_local_changes(&mut self) -> Result<(), String> {
-    // Clear all local changes
-    for object in &mut self.members {
-      // Remove local object
-      //! todo
-      // Clear object local changes
-      object.clear_local_changes()?;
-    }
-    Ok(())
-  }
-  pub fn apply_patch(
+  pub fn apply_action_object(
     &self,
     action_object: ActionObject<T, A>,
   ) -> Result<StorageObject<T, A>, String> {
-    unimplemented!()
+    let object_id = action_object.object_id;
+    if let Some(storage_object) =
+      &mut self.members.iter().find(|i| i.id == object_id)
+    {}
+    todo!()
   }
   pub fn filter(
     &self,
@@ -448,13 +439,13 @@ impl<
 }
 
 pub enum Mode {
-  Server { port_number: i32 },
+  Server { port_number: usize },
   Remote { remote_url: String },
   Local,
 }
 
 impl Mode {
-  pub fn server(port_number: i32) -> Self {
+  pub fn server(port_number: usize) -> Self {
     Self::Server { port_number }
   }
   pub fn remote(remote_url: String) -> Self {
@@ -465,13 +456,60 @@ impl Mode {
   }
 }
 
-pub struct Repository {
+/// Commit Log
+/// contains all the repository related logs
+pub struct CommitLog {
+  // Contains the remote commit log
+  remote: Vec<Commit>,
+  // Contains the latest remote commit id by storage_id's
+  // HashMap<StorageId, LatestCommitId>
+  latest_remote: HashMap<String, Uuid>,
+  // Contains the local commit log
+  local: Vec<Commit>,
+}
+
+impl CommitLog {
+  fn init(ctx: &Context) -> Result<Self, String> {
+    unimplemented!()
+  }
+}
+
+struct RepoDetails {
   mode: Mode,
-  commits: Vec<Commit>,
+  remote_url: Option<String>,
+}
+
+impl RepoDetails {
+  fn init(mode: Mode, remote_url: Option<String>) -> Self {}
+}
+
+pub struct Repository {
+  ctx: Context,
+  commits: CommitLog,
+  repo_details: RepoDetails,
 }
 
 impl Repository {
-  pub fn init(mode: Mode) -> Result<Self, String> {
+  pub fn init_local(ctx: Context) -> Result<Self, String> {
+    let res = Self {
+      ctx,
+      commits: todo!(),
+      repo_details: todo!(),
+    };
+    Ok(res)
+  }
+  pub fn init_remote(ctx: Context) -> Result<Self, String> {
+    let res = Self {
+      ctx,
+      commits: todo!(),
+      repo_details: todo!(),
+    };
+    Ok(res)
+  }
+  pub fn start_remote_watcher(&self) -> Result<(), String> {
+    unimplemented!()
+  }
+  pub fn start_server(self) -> Result<(), String> {
     unimplemented!()
   }
 }
