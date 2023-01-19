@@ -1,88 +1,67 @@
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
 
-use crate::{
-  context::Context,
-  db::Db,
-  prelude::{BitError, BitResult},
-};
-
-pub trait DataRead: Db {
-  fn read(ctx: &Context) -> BitResult<Self::DataType> {
-    // Try open staging
-    let mut file = OpenOptions::new()
-      .read(true)
-      .open(ctx.bit_data_path().join(Self::DB_PATH))
-      .map_err(|_| BitError::new("No db file found"))?;
-    let mut contents = vec![];
-    file.read_to_end(&mut contents)?;
-    Ok(bincode::deserialize(&contents)?)
-  }
+pub fn binary_read<T: for<'de> Deserialize<'de>>(
+  path: PathBuf,
+) -> Result<T, String> {
+  // Try open staging
+  let mut file = OpenOptions::new()
+    .read(true)
+    .open(&path)
+    .map_err(|_| format!("No binary file found: {:?}", &path))?;
+  let mut contents = vec![];
+  file.read_to_end(&mut contents).map_err(|e| e.to_string())?;
+  Ok(bincode::deserialize(&contents).map_err(|e| e.to_string())?)
 }
 
-#[async_trait]
-pub trait DataIter: Db {
-  type IterOutputType: for<'de> Deserialize<'de>
-    + Serialize
-    + Send
-    + Sync
-    + 'static;
-  async fn read(ctx: &Context) -> BitResult<Vec<Self::IterOutputType>> {
-    let ctx = ctx.to_owned();
-    let res = tokio::task::spawn_blocking(move || {
-      let mut res: Vec<Self::IterOutputType> = Vec::new();
-      let f =
-        std::fs::File::open(ctx.bit_data_path().join(Self::DB_PATH)).unwrap();
-      loop {
-        match bincode::deserialize_from(&f) {
-          Ok(r) => res.push(r),
-          Err(_) => {
-            break;
-          }
-        }
+pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
+  path: PathBuf,
+) -> Result<Vec<T>, String> {
+  // Try open staging
+  let mut res: Vec<T> = Vec::new();
+  let f = std::fs::File::open(&path)
+    .map_err(|_| format!("No binary file found: {:?}", path))?;
+  loop {
+    match bincode::deserialize_from(&f) {
+      Ok(r) => res.push(r),
+      Err(_) => {
+        break;
       }
-      res
-    })
-    .await?;
-    Ok(res)
+    }
   }
+  Ok(res)
 }
 
-#[async_trait]
-pub trait DataUpdate: Db {
-  async fn update(ctx: &Context, data: Self::DataType) -> BitResult<()> {
-    let mut file = OpenOptions::new()
-      .read(true)
-      .write(true)
-      .truncate(true)
-      .open(ctx.bit_data_path().join(Self::DB_PATH))
-      .await
-      .map_err(|_| BitError::new("No staging db file found"))?;
-    file.write_all(&bincode::serialize(&data).unwrap()).await?;
-    file.flush().await?;
-    Ok(())
-  }
+pub fn binary_update<T: Serialize>(
+  path: PathBuf,
+  data: T,
+) -> Result<(), String> {
+  let mut file = OpenOptions::new()
+    .read(true)
+    .write(true)
+    .truncate(true)
+    .open(&path)
+    .map_err(|_| format!("No bin file found to update: {:?}", &path))?;
+  file
+    .write_all(&bincode::serialize(&data).map_err(|e| e.to_string())?)
+    .map_err(|e| e.to_string())?;
+  file.flush().map_err(|e| e.to_string())?;
+  Ok(())
 }
 
-#[async_trait]
-pub trait DataAppend: Db {
-  type AppendDataType: Serialize + Send + Sync + 'static;
-  async fn append(ctx: &Context, data: Self::AppendDataType) -> BitResult<()> {
-    let ctx = ctx.to_owned();
-    let res: BitResult<()> = tokio::task::spawn_blocking(move || {
-      let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(ctx.bit_data_path().join(Self::DB_PATH))
-        .map_err(|_| BitError::new("No REMOTE db file found"))?;
-      file.seek(SeekFrom::End(0)).unwrap();
-      bincode::serialize_into(&file, &data).unwrap();
-      file.flush().unwrap();
-      Ok(())
-    })
-    .await?;
-    res?;
-    Ok(())
-  }
+pub fn binary_continuous_append<T: Serialize>(
+  path: PathBuf,
+  append_data: T,
+) -> Result<(), String> {
+  let mut file = std::fs::OpenOptions::new()
+    .read(true)
+    .write(true)
+    .open(&path)
+    .map_err(|_| format!("No continuous file found to append: {:?}", &path))?;
+  file.seek(SeekFrom::End(0)).unwrap();
+  bincode::serialize_into(&file, &append_data).map_err(|e| e.to_string())?;
+  file.flush().map_err(|e| e.to_string())?;
+  Ok(())
 }

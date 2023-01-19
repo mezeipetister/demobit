@@ -376,8 +376,8 @@ pub struct Storage<
   A: ActionExt<ObjectType = T>,
 > {
   id: String,
-  members: Vec<Uuid>,
-  // members: Vec<StorageObject<T, A>>,
+  member_ids: Vec<Uuid>,
+  members: Vec<StorageObject<T, A>>,
   last_remote_commit_id: Option<Uuid>,
 }
 
@@ -509,11 +509,13 @@ struct RepoDetails {
 }
 
 impl RepoDetails {
-  fn init(mode: Mode, remote_url: Option<String>) -> Self {}
+  fn init(mode: Mode, remote_url: Option<String>) -> Self {
+    unimplemented!()
+  }
 }
 
 pub trait StorageFinder {
-  fn get(&self, id: &str) -> Result<Storage, String>;
+  fn get(&self, id: &str) -> Result<(), String>;
 }
 
 pub struct Repository<T: StorageFinder> {
@@ -523,27 +525,27 @@ pub struct Repository<T: StorageFinder> {
   data: Mutex<T>,
 }
 
-impl Repository {
-  pub fn init_local(ctx: Context) -> Result<Self, String> {
-    let res = Self {
-      ctx,
-      commit_log: todo!(),
-      repo_details: todo!(),
-    };
-    Ok(res)
-  }
-  pub fn init_remote(ctx: Context) -> Result<Self, String> {
-    let res = Self {
-      ctx,
-      commit_log: todo!(),
-      repo_details: todo!(),
-    };
-    Ok(res)
-  }
-  pub fn start_remote_watcher(&self) -> Result<(), String> {
-    unimplemented!()
-  }
-  pub fn start_server(self) -> Result<(), String> {
-    unimplemented!()
-  }
-}
+// impl Repository {
+//   pub fn init_local(ctx: Context) -> Result<Self, String> {
+//     let res = Self {
+//       ctx,
+//       commit_log: todo!(),
+//       repo_details: todo!(),
+//     };
+//     Ok(res)
+//   }
+//   pub fn init_remote(ctx: Context) -> Result<Self, String> {
+//     let res = Self {
+//       ctx,
+//       commit_log: todo!(),
+//       repo_details: todo!(),
+//     };
+//     Ok(res)
+//   }
+//   pub fn start_remote_watcher(&self) -> Result<(), String> {
+//     unimplemented!()
+//   }
+//   pub fn start_server(self) -> Result<(), String> {
+//     unimplemented!()
+//   }
+// }
