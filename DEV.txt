@@ -53,3 +53,21 @@ impl AppData {
 
 
 (Commit + Action) -> ActionObject (Local) -> StorageObject -> Storage
+
+---
+
+Filesystem (FS)
+
+  - ProjectRootDb/
+    - storage/
+      - repo_details (bincode file)
+      - commit_log (bincode file)
+      - storage_details/
+        - IDXX (Storage ID)
+        - IDXX
+        - IDXX
+      - storage_data/
+        - IDXX/
+          - Object_IDXX
+          - Object_IDXX
+          - Object_IDxx

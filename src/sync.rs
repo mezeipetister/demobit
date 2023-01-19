@@ -518,7 +518,7 @@ pub trait StorageFinder {
 
 pub struct Repository<T: StorageFinder> {
   ctx: Context,
-  commits: CommitLog,
+  commit_log: CommitLog,
   repo_details: RepoDetails,
   data: Mutex<T>,
 }
@@ -527,7 +527,7 @@ impl Repository {
   pub fn init_local(ctx: Context) -> Result<Self, String> {
     let res = Self {
       ctx,
-      commits: todo!(),
+      commit_log: todo!(),
       repo_details: todo!(),
     };
     Ok(res)
@@ -535,7 +535,7 @@ impl Repository {
   pub fn init_remote(ctx: Context) -> Result<Self, String> {
     let res = Self {
       ctx,
-      commits: todo!(),
+      commit_log: todo!(),
       repo_details: todo!(),
     };
     Ok(res)
