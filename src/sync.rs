@@ -171,6 +171,8 @@ pub struct StorageObject<
 > {
   // Storage Object unique ID
   id: Uuid,
+  // StorageId
+  storage_id: String,
   // Remote actions
   remote_actions: Vec<ActionObject<T, A>>,
   // Local actions
@@ -525,27 +527,22 @@ pub struct Repository<T: StorageFinder> {
   data: Mutex<T>,
 }
 
-// impl Repository {
-//   pub fn init_local(ctx: Context) -> Result<Self, String> {
-//     let res = Self {
-//       ctx,
-//       commit_log: todo!(),
-//       repo_details: todo!(),
-//     };
-//     Ok(res)
-//   }
-//   pub fn init_remote(ctx: Context) -> Result<Self, String> {
-//     let res = Self {
-//       ctx,
-//       commit_log: todo!(),
-//       repo_details: todo!(),
-//     };
-//     Ok(res)
-//   }
-//   pub fn start_remote_watcher(&self) -> Result<(), String> {
-//     unimplemented!()
-//   }
-//   pub fn start_server(self) -> Result<(), String> {
-//     unimplemented!()
-//   }
-// }
+impl<T: StorageFinder> Repository<T> {
+  pub fn init_local(ctx: Context) -> Result<Self, String> {
+    let res = Self {
+      ctx,
+      commit_log: todo!(),
+      repo_details: todo!(),
+    };
+    Ok(res)
+  }
+  pub fn init_remote(ctx: Context) -> Result<Self, String> {
+    unimplemented!()
+  }
+  pub fn start_remote_watcher(&self) -> Result<(), String> {
+    unimplemented!()
+  }
+  pub fn start_server(self) -> Result<(), String> {
+    unimplemented!()
+  }
+}

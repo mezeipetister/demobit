@@ -65,3 +65,13 @@ pub fn binary_continuous_append<T: Serialize>(
   file.flush().map_err(|e| e.to_string())?;
   Ok(())
 }
+
+pub fn init_file<T: Serialize>(
+  path: PathBuf,
+  init_data: T,
+) -> Result<(), String> {
+  std::fs::create_dir_all(&path)
+    .map_err(|_| format!("Error creating file: {:?}", &path))?;
+  binary_update(path, init_data)?;
+  Ok(())
+}
