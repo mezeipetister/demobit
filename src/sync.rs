@@ -1,5 +1,9 @@
 use std::{
-  collections::HashMap, fmt::Debug, ops::Deref, path::PathBuf, sync::Mutex,
+  collections::HashMap,
+  fmt::Debug,
+  ops::Deref,
+  path::PathBuf,
+  sync::{Arc, Mutex},
 };
 
 use chrono::{DateTime, Utc};
@@ -162,7 +166,7 @@ pub struct Commit {
   dtime: DateTime<Utc>,
   comment: String,
   ancestor_id: Uuid,
-  serialized_actions: Vec<String>, // Action JSONs in Vec
+  serialized_actions: Vec<String>, // ActionObject JSONs in Vec
 }
 
 pub struct StorageObject<
@@ -454,6 +458,12 @@ impl<
   ) -> Result<(), String> {
     unimplemented!()
   }
+  pub fn register(&self, repository: &Repository) -> Result<(), String> {
+    repository.add_storage_hook(Box::new(|a: &str| -> Result<(), String> {
+      unimplemented!()
+    }))?;
+    Ok(())
+  }
 }
 
 /// Implementing deref for Storaget<T, A>
@@ -516,24 +526,36 @@ impl RepoDetails {
   }
 }
 
-pub trait StorageFinder {
-  fn get(&self, id: &str) -> Result<(), String>;
-}
-
-pub struct Repository<T: StorageFinder> {
+pub struct RepoData {
   ctx: Context,
   commit_log: CommitLog,
   repo_details: RepoDetails,
-  data: Mutex<T>,
+  storage_hooks: Vec<Box<dyn Fn(&str) -> Result<(), String>>>,
 }
 
-impl<T: StorageFinder> Repository<T> {
+impl RepoData {
+  fn add_storage_hook(
+    &mut self,
+    hook: Box<dyn Fn(&str) -> Result<(), String>>,
+  ) -> Result<(), String> {
+    self.storage_hooks.push(hook);
+    Ok(())
+  }
+}
+
+pub struct Repository {
+  inner: Arc<Mutex<RepoData>>,
+}
+
+impl Repository {
   pub fn init_local(ctx: Context) -> Result<Self, String> {
     let res = Self {
-      ctx,
-      commit_log: todo!(),
-      repo_details: todo!(),
-      data: todo!(),
+      inner: Arc::new(Mutex::new(RepoData {
+        ctx,
+        commit_log: todo!(),
+        repo_details: todo!(),
+        storage_hooks: vec![],
+      })),
     };
     Ok(res)
   }
@@ -545,5 +567,11 @@ impl<T: StorageFinder> Repository<T> {
   }
   pub fn start_server(self) -> Result<(), String> {
     unimplemented!()
+  }
+  fn add_storage_hook(
+    &self,
+    hook: Box<dyn Fn(&str) -> Result<(), String>>,
+  ) -> Result<(), String> {
+    self.inner.lock().unwrap().add_storage_hook(hook)
   }
 }
