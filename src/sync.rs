@@ -12,35 +12,6 @@ use uuid::Uuid;
 
 use crate::prelude::sha1_signature;
 
-pub trait InitActionObject<A: ActionExt> {
-  fn create_init_action_object(
-    &self,
-    commit: &Commit,
-  ) -> Result<ActionObject<Self, A>, String>
-  where
-    Self: Clone + Serialize + for<'de> Deserialize<'de>,
-  {
-    let res = ActionObject {
-      id: Uuid::new_v4(),
-      object_id: Uuid::new_v4(),
-      uid: commit.uid.clone(),
-      dtime: Utc::now(),
-      commit_id: Some(commit.id),
-      parent_action_id: None,
-      action: ActionKind::Create((*self).clone()),
-      object_signature: sha1_signature(&self)?,
-      remote_signature: None,
-    };
-    Ok(res)
-  }
-}
-
-// Auto implement InitActionObject trait
-impl<A: ActionExt, T> InitActionObject<A> for T where
-  T: Serialize + Clone + for<'de> Deserialize<'de>
-{
-}
-
 /// Storage Context
 /// containing operational details
 /// such as db root path or uid
@@ -57,7 +28,7 @@ impl Context {
 
 /// Action trait for Actionable types
 /// Implemented types can be used as storage patch objects.
-pub trait ActionExt: Serialize + for<'de> Deserialize<'de> {
+pub trait ActionExt: Clone {
   /// Action can work with this
   /// type
   type ObjectType;
@@ -72,11 +43,17 @@ pub trait ActionExt: Serialize + for<'de> Deserialize<'de> {
   ) -> Result<Self::ObjectType, String>;
 }
 
+pub trait ObjectExt: Debug + Clone {}
+
 /// Generic acion representation
 /// Atomic action kinds with the following states:
 /// Create, Patch, Remove, Recover
-#[derive(Serialize, Clone)]
-enum ActionKind<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt> {
+#[derive(Serialize, Deserialize, Clone)]
+enum ActionKind<T, A>
+where
+  T: ObjectExt,
+  A: ActionExt,
+{
   /// Create a new object with the given
   /// initial T values (No default as default)
   Create(T),
@@ -86,11 +63,17 @@ enum ActionKind<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt> {
 
 /// ActionObject must be produced by a StorageObject
 /// By providing a &Commit and an A: impl ActionExt to it.
-#[derive(Serialize, Clone)]
-pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ActionObject<T, A>
+where
+  T: ObjectExt,
+  A: ActionExt,
 {
   // Unique ID
   id: Uuid,
+  // Referred Storage ID
+  // Object must be located under it
+  storage_id: String,
   // Referred ObjectId
   // must be applied on it
   object_id: Uuid,
@@ -100,7 +83,8 @@ pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
   dtime: DateTime<Utc>,
   // Related commit id
   commit_id: Option<Uuid>,
-  // Object actions parent action id //todo! maybe we should remove it?
+  // Object actions parent action id
+  // We can use this attribute to check action chain per storage object
   parent_action_id: Option<Uuid>,
   // Create(T) or Patch(A)
   action: ActionKind<T, A>,
@@ -113,10 +97,10 @@ pub struct ActionObject<T: Serialize + for<'de> Deserialize<'de>, A: ActionExt>
   remote_signature: Option<String>,
 }
 
-impl<
-    T: Serialize + for<'de> Deserialize<'de> + Clone + Debug,
-    A: ActionExt + Clone,
-  > ActionObject<T, A>
+impl<T, A> ActionObject<T, A>
+where
+  T: ObjectExt + Serialize,
+  A: ActionExt + Serialize,
 {
   // Check if local action_object
   fn is_local(&self) -> bool {
@@ -169,10 +153,11 @@ pub struct Commit {
   serialized_actions: Vec<String>, // ActionObject JSONs in Vec
 }
 
-pub struct StorageObject<
-  T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
+pub struct StorageObject<T, A>
+where
+  T: ObjectExt,
   A: ActionExt<ObjectType = T>,
-> {
+{
   // Storage Object unique ID
   id: Uuid,
   // StorageId
@@ -189,10 +174,10 @@ pub struct StorageObject<
 
 /// Implementing deref for StorageObject<T, A>
 /// It means we can immutably access underlying object data
-impl<
-    T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T>,
-  > Deref for StorageObject<T, A>
+impl<T, A> Deref for StorageObject<T, A>
+where
+  T: ObjectExt,
+  A: ActionExt<ObjectType = T>,
 {
   type Target = T;
   fn deref(&self) -> &Self::Target {
@@ -200,10 +185,10 @@ impl<
   }
 }
 
-impl<
-    T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T> + Clone,
-  > StorageObject<T, A>
+impl<T, A> StorageObject<T, A>
+where
+  T: ObjectExt + Serialize,
+  A: ActionExt<ObjectType = T> + Serialize,
 {
   // Clear all local changes
   // If object is local (no remote actions and object state)
@@ -265,6 +250,7 @@ impl<
     };
     let res = ActionObject {
       id: Uuid::new_v4(),
+      storage_id: self.storage_id.clone(),
       object_id: self.id.clone(),
       uid: ctx.uid.to_owned(),
       dtime,
@@ -377,20 +363,41 @@ impl<
 
 /// Generic Storage that can hold Vec<T>
 /// and perform patch A operations
-pub struct Storage<
-  T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
+pub struct Storage<T, A>
+where
+  T: ObjectExt,
   A: ActionExt<ObjectType = T>,
-> {
+{
+  inner: Arc<Mutex<StorageInner<T, A>>>,
+}
+
+impl<T, A> Deref for Storage<T, A>
+where
+  T: ObjectExt,
+  A: ActionExt<ObjectType = T>,
+{
+  type Target = Mutex<StorageInner<T, A>>;
+
+  fn deref(&self) -> &Self::Target {
+    &self.inner
+  }
+}
+
+pub struct StorageInner<T, A>
+where
+  T: ObjectExt,
+  A: ActionExt<ObjectType = T>,
+{
   id: String,
   member_ids: Vec<Uuid>,
   members: Vec<StorageObject<T, A>>,
   last_remote_commit_id: Option<Uuid>,
 }
 
-impl<
-    T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T> + Clone,
-  > Storage<T, A>
+impl<T, A> Storage<T, A>
+where
+  T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
+  A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de>,
 {
   /// Init a storage by providing a repository object
   /// Based on its data it can pull itself, or init itself
@@ -401,81 +408,44 @@ impl<
   fn get_by_id(&self, id: Uuid) -> Result<ActionObject<T, A>, String> {
     unimplemented!()
   }
-  // Create new object storage
-  // as local change
-  pub fn insert_new_object(
-    &self,
-    ctx: &Context,
-    commit: &mut Commit,
-    object: T,
-  ) -> Result<&T, String> {
-    unimplemented!()
-  }
-  // Local patch storage object
-  pub fn local_patch(
-    &self,
-    ctx: &Context,
-    commit: &mut Commit,
-    object_id: Uuid,
-    action: A,
-  ) -> Result<&T, String> {
-    unimplemented!()
-  }
-  fn apply_local_action_object(
+  fn add_action_object(
     &self,
     action_object: ActionObject<T, A>,
   ) -> Result<StorageObject<T, A>, String> {
     let object_id = action_object.object_id;
-    if let Some(storage_object) =
-      &mut self.members.iter().find(|i| i.id == object_id)
-    {}
     todo!()
   }
-  pub fn filter(
-    &self,
-    filter_fn: impl Fn(&T) -> bool,
-  ) -> Vec<&StorageObject<T, A>> {
-    self
-      .members
-      .iter()
-      .filter(|i| filter_fn(&i.local_object))
-      .collect()
-  }
-  pub fn filter_all(
-    &self,
-    filter_fn: impl Fn(&T) -> bool,
-  ) -> Vec<&StorageObject<T, A>> {
-    self
-      .members
-      .iter()
-      .filter(|i| filter_fn(&i.local_object))
-      .collect()
-  }
-  // Add remote action object
-  // e.g. by watch or manual pull
-  pub fn add_remote_action_object_json(
-    aob_json_str: &str,
-  ) -> Result<(), String> {
-    unimplemented!()
-  }
+  // pub fn filter(
+  //   &self,
+  //   filter_fn: impl Fn(&T) -> bool,
+  // ) -> Vec<&StorageObject<T, A>> {
+  //   self
+  //     .members
+  //     .iter()
+  //     .filter(|i| filter_fn(&i.local_object))
+  //     .collect()
+  // }
+  // pub fn filter_all(
+  //   &self,
+  //   filter_fn: impl Fn(&T) -> bool,
+  // ) -> Vec<&StorageObject<T, A>> {
+  //   self
+  //     .members
+  //     .iter()
+  //     .filter(|i| filter_fn(&i.local_object))
+  //     .collect()
+  // }
+  /// Register a callback to a given repository
+  /// Repository will use this callback to update storage
   pub fn register(&self, repository: &Repository) -> Result<(), String> {
-    repository.add_storage_hook(Box::new(|a: &str| -> Result<(), String> {
-      unimplemented!()
-    }))?;
+    repository.add_storage_hook(Box::new(
+      |aobstr: &str| -> Option<Result<(), String>> {
+        // Try deserialize action object
+        if let Ok(aob) = serde_json::from_str::<ActionObject<T, A>>(aobstr) {}
+        None
+      },
+    ))?;
     Ok(())
-  }
-}
-
-/// Implementing deref for Storaget<T, A>
-/// It means we can immutably iterate over its objects
-impl<
-    T: Serialize + for<'de> Deserialize<'de> + Debug + Clone,
-    A: ActionExt<ObjectType = T>,
-  > Deref for Storage<T, A>
-{
-  type Target = Vec<StorageObject<T, A>>;
-  fn deref(&self) -> &Self::Target {
-    &self.members
   }
 }
 
@@ -530,13 +500,13 @@ pub struct RepoData {
   ctx: Context,
   commit_log: CommitLog,
   repo_details: RepoDetails,
-  storage_hooks: Vec<Box<dyn Fn(&str) -> Result<(), String>>>,
+  storage_hooks: Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>,
 }
 
 impl RepoData {
   fn add_storage_hook(
     &mut self,
-    hook: Box<dyn Fn(&str) -> Result<(), String>>,
+    hook: Box<dyn Fn(&str) -> Option<Result<(), String>>>,
   ) -> Result<(), String> {
     self.storage_hooks.push(hook);
     Ok(())
@@ -568,9 +538,12 @@ impl Repository {
   pub fn start_server(self) -> Result<(), String> {
     unimplemented!()
   }
+  // Private method to register
+  // storage hooks
+  // Storage update process will occur via these hooks (callbacks)
   fn add_storage_hook(
     &self,
-    hook: Box<dyn Fn(&str) -> Result<(), String>>,
+    hook: Box<dyn Fn(&str) -> Option<Result<(), String>>>,
   ) -> Result<(), String> {
     self.inner.lock().unwrap().add_storage_hook(hook)
   }
