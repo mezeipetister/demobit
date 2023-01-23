@@ -1,3 +1,3 @@
 mod fs;
-mod prelude;
-mod sync;
+pub mod prelude;
+pub mod sync;
