@@ -66,12 +66,13 @@ pub fn binary_continuous_append<T: Serialize>(
   Ok(())
 }
 
-pub fn init_file<T: Serialize>(
+pub fn binary_init<T: Serialize + for<'de> Deserialize<'de>>(
   path: PathBuf,
   init_data: T,
-) -> Result<(), String> {
+) -> Result<T, String> {
   std::fs::create_dir_all(&path)
     .map_err(|_| format!("Error creating file: {:?}", &path))?;
-  binary_update(path, init_data)?;
-  Ok(())
+  binary_update(path.clone(), init_data)?;
+  let res = binary_read(path)?;
+  Ok(res)
 }

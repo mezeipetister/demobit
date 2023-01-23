@@ -60,14 +60,14 @@ Filesystem (FS)
 
   - ProjectRootDb/
     - storage/
-      - repo_details (bincode file)
-      - commit_log (bincode file)
+      *S repo_details (bincode file)
+      *S commit_log (bincode file)
       - storage_details/
-        - IDXX (Storage ID)
-        - IDXX
-        - IDXX
+        *D IDXX (Storage ID)
+        *D IDXX
+        *D IDXX
       - storage_data/
         - IDXX/
-          - Object_IDXX
-          - Object_IDXX
-          - Object_IDxx
+          *D Object_IDXX
+          *D Object_IDXX
+          *D Object_IDxx

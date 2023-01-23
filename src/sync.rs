@@ -10,14 +10,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::prelude::sha1_signature;
+use crate::{
+  fs::{binary_init, binary_read, binary_update},
+  prelude::{path_helper, sha1_signature},
+};
 
 /// Storage Context
 /// containing operational details
 /// such as db root path or uid
+#[derive(Clone)]
 pub struct Context {
-  db_root_path: PathBuf,
-  uid: String,
+  pub db_root_path: PathBuf,
+  pub uid: String,
 }
 
 impl Context {
@@ -144,6 +148,7 @@ where
   }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Commit {
   id: Uuid,
   uid: String,
@@ -153,6 +158,7 @@ pub struct Commit {
   serialized_actions: Vec<String>, // ActionObject JSONs in Vec
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct StorageObject<T, A>
 where
   T: ObjectExt,
@@ -187,9 +193,33 @@ where
 
 impl<T, A> StorageObject<T, A>
 where
-  T: ObjectExt + Serialize,
-  A: ActionExt<ObjectType = T> + Serialize,
+  T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
+  A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de>,
 {
+  fn new_from_aob(aob: ActionObject<T, A>) -> Result<Self, String> {
+    if let ActionKind::Create(data) = aob.action.clone() {
+      let res = match aob.is_local() {
+        true => Self {
+          id: aob.id,
+          storage_id: aob.storage_id.clone(),
+          remote_actions: vec![],
+          local_actions: vec![aob],
+          remote_object: None,
+          local_object: data,
+        },
+        false => Self {
+          id: aob.id,
+          storage_id: aob.storage_id.clone(),
+          remote_actions: vec![aob],
+          local_actions: vec![],
+          remote_object: Some(data.clone()),
+          local_object: data,
+        },
+      };
+      return Ok(res);
+    }
+    Err("Action Ojbect must be create kind".into())
+  }
   // Clear all local changes
   // If object is local (no remote actions and object state)
   // we should not be here. That object should be removed without
@@ -262,10 +292,23 @@ where
     };
     Ok(res)
   }
+  // Add action object
+  fn add_action_object(
+    &mut self,
+    action_object: ActionObject<T, A>,
+    ctx: &Context,
+  ) -> Result<&T, String> {
+    if action_object.is_local() {
+      return self.add_local_action_object(action_object, ctx);
+    } else {
+      return self.add_remote_action_object(action_object, ctx);
+    }
+  }
   // Add local action object to Storage Object
   fn add_local_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
+    ctx: &Context,
   ) -> Result<&T, String> {
     // Check if action object is local
     if action_object.is_remote() {
@@ -299,6 +342,8 @@ where
       self.local_object = patched_object;
       // Insert action object
       self.local_actions.push(action_object);
+      // Save to fs
+      self.save_to_fs(ctx)?;
       // Return patched data as ref
       return Ok(&self.local_object);
     }
@@ -309,6 +354,7 @@ where
   fn add_remote_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
+    ctx: &Context,
   ) -> Result<&T, String> {
     // Check if action object is a remote one
     if !action_object.is_remote() {
@@ -352,6 +398,8 @@ where
       self.remote_actions.push(action_object);
       // Rebuild local action objects
       self.rebuild_local_objects()?;
+      // Save to FS
+      self.save_to_fs(ctx)?;
       // Return current local object
       // Important! We return LOCAL, as its the latest version of our
       // data object.
@@ -359,10 +407,25 @@ where
     }
     Err("Patch must have Patch action kind!".into())
   }
+  // Init storage object from FS
+  fn read_from_fs(
+    ctx: &Context,
+    storage_id: &str,
+    object_id: Uuid,
+  ) -> Result<Self, String> {
+    binary_read(path_helper::storage_object_path(ctx, storage_id, object_id))
+  }
+  // Update storage object file
+  fn save_to_fs(&self, ctx: &Context) -> Result<(), String> {
+    let object_path =
+      path_helper::storage_object_path(ctx, &self.storage_id, self.id);
+    binary_update(object_path, &self)
+  }
 }
 
 /// Generic Storage that can hold Vec<T>
 /// and perform patch A operations
+#[derive(Clone)]
 pub struct Storage<T, A>
 where
   T: ObjectExt,
@@ -383,6 +446,7 @@ where
   }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct StorageInner<T, A>
 where
   T: ObjectExt,
@@ -391,57 +455,153 @@ where
   id: String,
   member_ids: Vec<Uuid>,
   members: Vec<StorageObject<T, A>>,
-  last_remote_commit_id: Option<Uuid>,
 }
 
 impl<T, A> Storage<T, A>
 where
-  T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
-  A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de>,
+  T: ObjectExt + Serialize + for<'de> Deserialize<'de> + 'static,
+  A:
+    ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de> + 'static,
 {
   /// Init a storage by providing a repository object
   /// Based on its data it can pull itself, or init itself
   /// as a local repository with initial data
-  pub fn init(id: String) -> Result<Self, String> {
-    unimplemented!()
+  pub fn load_or_init(
+    ctx: &Context,
+    storage_id: String,
+  ) -> Result<Self, String> {
+    let storage_details_path =
+      path_helper::storage_details_path(ctx, &storage_id);
+    let inner: StorageInner<T, A> = match storage_details_path.exists() {
+      true => binary_read(storage_details_path)?,
+      false => binary_init(
+        storage_details_path,
+        StorageInner {
+          id: storage_id,
+          member_ids: Vec::default(),
+          members: Vec::default(),
+        },
+      )?,
+    };
+    Ok(Self {
+      inner: Arc::new(Mutex::new(inner)),
+    })
   }
-  fn get_by_id(&self, id: Uuid) -> Result<ActionObject<T, A>, String> {
-    unimplemented!()
+
+  fn storage_id(&self) -> String {
+    self.inner.lock().unwrap().id.to_owned()
   }
-  fn add_action_object(
+
+  // Get a single storage object by id
+  pub fn get_object_by_id(
     &self,
-    action_object: ActionObject<T, A>,
+    ctx: &Context,
+    object_id: Uuid,
   ) -> Result<StorageObject<T, A>, String> {
-    let object_id = action_object.object_id;
-    todo!()
+    // Check whether id is member
+    if self
+      .inner
+      .lock()
+      .unwrap()
+      .member_ids
+      .iter()
+      .find(|i| **i == object_id)
+      .is_none()
+    {
+      return Err(format!(
+        "Storage does not have a member with id {}",
+        object_id
+      ));
+    }
+    // read binary
+    StorageObject::read_from_fs(ctx, &self.inner.lock().unwrap().id, object_id)
   }
-  // pub fn filter(
-  //   &self,
-  //   filter_fn: impl Fn(&T) -> bool,
-  // ) -> Vec<&StorageObject<T, A>> {
-  //   self
-  //     .members
-  //     .iter()
-  //     .filter(|i| filter_fn(&i.local_object))
-  //     .collect()
-  // }
-  // pub fn filter_all(
-  //   &self,
-  //   filter_fn: impl Fn(&T) -> bool,
-  // ) -> Vec<&StorageObject<T, A>> {
-  //   self
-  //     .members
-  //     .iter()
-  //     .filter(|i| filter_fn(&i.local_object))
-  //     .collect()
-  // }
+
+  // Get All
+  pub fn get_all(
+    &self,
+    ctx: &Context,
+  ) -> Result<Vec<StorageObject<T, A>>, String> {
+    let ids = self.inner.lock().unwrap().member_ids.clone();
+    let mut res = Vec::new();
+    for id in ids {
+      res.push(self.get_object_by_id(ctx, id)?);
+    }
+    Ok(res)
+  }
+
+  // Get by filter
+  pub fn get_by_filter(
+    &self,
+    ctx: &Context,
+    filter: impl Fn(&T) -> bool,
+  ) -> Result<Vec<StorageObject<T, A>>, String> {
+    let ids = self.inner.lock().unwrap().member_ids.clone();
+    let mut res = Vec::new();
+    for id in ids {
+      let so = self.get_object_by_id(ctx, id)?;
+      if filter(&so) {
+        res.push(so);
+      }
+    }
+    Ok(res)
+  }
+
+  // Add action object to storage object
+  pub fn add_action_object(
+    &self,
+    ctx: &Context,
+    action_object: ActionObject<T, A>,
+  ) -> Result<T, String> {
+    let object_id = action_object.object_id;
+    // Create a new one
+    let data = match action_object.is_kind_create() {
+      true => {
+        // Create new storage object
+        let new_storage_object = StorageObject::new_from_aob(action_object)?;
+        // Get data
+        let data = new_storage_object.local_object.clone();
+        // Get Object path
+        let path = path_helper::storage_object_path(
+          ctx,
+          &new_storage_object.storage_id,
+          new_storage_object.id,
+        );
+        // Init in FS and save its content as binary
+        binary_init(path, new_storage_object)?;
+        // Return data
+        data
+      }
+      // Try to patch existing one
+      false => self
+        .get_object_by_id(ctx, object_id)?
+        .add_action_object(action_object, ctx)?
+        .clone(),
+    };
+    Ok(data)
+  }
+
   /// Register a callback to a given repository
   /// Repository will use this callback to update storage
-  pub fn register(&self, repository: &Repository) -> Result<(), String> {
+  pub fn register<'a: 'static>(
+    &'a self,
+    ctx: Context,
+    repository: &Repository,
+  ) -> Result<(), String> {
+    let _self = self.clone();
     repository.add_storage_hook(Box::new(
-      |aobstr: &str| -> Option<Result<(), String>> {
-        // Try deserialize action object
-        if let Ok(aob) = serde_json::from_str::<ActionObject<T, A>>(aobstr) {}
+      move |aobstr: &str| -> Option<Result<(), String>> {
+        // Try to deserialize action object
+        if let Ok(aob) = serde_json::from_str::<ActionObject<T, A>>(aobstr) {
+          // Check if storage target is ok
+          if &aob.storage_id != &self.storage_id() {
+            return None;
+          }
+          match self.add_action_object(&ctx, aob) {
+            Ok(_) => return Some(Ok(())),
+            Err(e) => return Some(Err(e)),
+          };
+        }
         None
       },
     ))?;
@@ -449,26 +609,18 @@ where
   }
 }
 
-pub enum Mode {
+// Repository Mode
+// Local, Remote or Server
+#[derive(Serialize, Deserialize)]
+enum Mode {
   Server { port_number: usize },
   Remote { remote_url: String },
   Local,
 }
 
-impl Mode {
-  pub fn server(port_number: usize) -> Self {
-    Self::Server { port_number }
-  }
-  pub fn remote(remote_url: String) -> Self {
-    Self::Remote { remote_url }
-  }
-  pub fn local() -> Self {
-    Self::Local
-  }
-}
-
 /// Commit Log
 /// contains all the repository related logs
+#[derive(Default, Serialize, Deserialize)]
 pub struct CommitLog {
   // Contains the remote commit log
   remote: Vec<Commit>,
@@ -480,19 +632,24 @@ pub struct CommitLog {
 }
 
 impl CommitLog {
-  fn init(ctx: &Context) -> Result<Self, String> {
-    unimplemented!()
+  fn init(ctx: &Context) -> Result<(), String> {
+    binary_init(path_helper::commit_log(ctx), Self::default())?;
+    Ok(())
+  }
+  fn load(ctx: &Context) -> Result<Self, String> {
+    binary_read(path_helper::commit_log(ctx))
   }
 }
 
+#[derive(Serialize, Deserialize)]
 struct RepoDetails {
   mode: Mode,
-  remote_url: Option<String>,
 }
 
 impl RepoDetails {
-  fn init(mode: Mode, remote_url: Option<String>) -> Self {
-    unimplemented!()
+  fn init(ctx: &Context, mode: Mode) -> Result<(), String> {
+    binary_init(path_helper::repo_details(ctx), RepoDetails { mode })?;
+    Ok(())
   }
 }
 
@@ -518,6 +675,9 @@ pub struct Repository {
 }
 
 impl Repository {
+  /// Init local repository
+  /// No remote server, no pull/push
+  /// Only local commits
   pub fn init_local(ctx: Context) -> Result<Self, String> {
     let res = Self {
       inner: Arc::new(Mutex::new(RepoData {
@@ -529,12 +689,14 @@ impl Repository {
     };
     Ok(res)
   }
+  /// Init remote repository by
+  /// syncing its remote data to local
+  /// Pull push sync is required
   pub fn init_remote(ctx: Context) -> Result<Self, String> {
     unimplemented!()
   }
-  pub fn start_remote_watcher(&self) -> Result<(), String> {
-    unimplemented!()
-  }
+  /// Start remote repository
+  /// and watch for client pull/push sync requests
   pub fn start_server(self) -> Result<(), String> {
     unimplemented!()
   }
