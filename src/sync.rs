@@ -612,10 +612,22 @@ where
 // Repository Mode
 // Local, Remote or Server
 #[derive(Serialize, Deserialize)]
-enum Mode {
+pub enum Mode {
   Server { port_number: usize },
   Remote { remote_url: String },
   Local,
+}
+
+impl Mode {
+  pub fn server(port_number: usize) -> Self {
+    Self::Server { port_number }
+  }
+  pub fn remote(remote_url: String) -> Self {
+    Self::Remote { remote_url }
+  }
+  pub fn local() -> Self {
+    Self::Local
+  }
 }
 
 /// Commit Log
@@ -651,6 +663,9 @@ impl RepoDetails {
     binary_init(path_helper::repo_details(ctx), RepoDetails { mode })?;
     Ok(())
   }
+  fn load(ctx: &Context) -> Result<Self, String> {
+    binary_read(path_helper::repo_details(ctx))
+  }
 }
 
 pub struct RepoData {
@@ -675,30 +690,43 @@ pub struct Repository {
 }
 
 impl Repository {
-  /// Init local repository
-  /// No remote server, no pull/push
-  /// Only local commits
-  pub fn init_local(ctx: Context) -> Result<Self, String> {
+  /// Load repository
+  pub fn load(ctx: Context) -> Result<Self, String> {
+    // Load commit log
+    let commit_log = CommitLog::load(&ctx)?;
+    // Load repo details
+    let repo_details = RepoDetails::load(&ctx)?;
+    // Create res
     let res = Self {
       inner: Arc::new(Mutex::new(RepoData {
         ctx,
-        commit_log: todo!(),
-        repo_details: todo!(),
+        commit_log,
+        repo_details,
         storage_hooks: vec![],
       })),
     };
     Ok(res)
   }
-  /// Init remote repository by
-  /// syncing its remote data to local
-  /// Pull push sync is required
-  pub fn init_remote(ctx: Context) -> Result<Self, String> {
-    unimplemented!()
-  }
-  /// Start remote repository
-  /// and watch for client pull/push sync requests
-  pub fn start_server(self) -> Result<(), String> {
-    unimplemented!()
+  /// Init repository
+  pub fn init(ctx: Context, mode: Mode) -> Result<Self, String> {
+    // Init commit log
+    CommitLog::init(&ctx)?;
+    // Load commit log
+    let commit_log = CommitLog::load(&ctx)?;
+    // Init repo details
+    RepoDetails::init(&ctx, mode)?;
+    // Load repo details
+    let repo_details = RepoDetails::load(&ctx)?;
+    // Create res
+    let res = Self {
+      inner: Arc::new(Mutex::new(RepoData {
+        ctx,
+        commit_log,
+        repo_details,
+        storage_hooks: vec![],
+      })),
+    };
+    Ok(res)
   }
   // Private method to register
   // storage hooks
