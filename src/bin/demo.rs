@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use storage::{
-  sync::{ActionExt, Context, ObjectExt, Storage},
+  sync::{ActionExt, Context, ObjectExt, Repository, Storage},
   *,
 };
 
@@ -46,7 +46,12 @@ impl ActionExt for UserAction {
 }
 
 fn main() {
+  // Demo Context
   let ctx = Context::new(PathBuf::from("./data"), "mezeipetister".into());
+
+  let repo: Repository =
+    Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
+
   let a: Storage<User, UserAction> =
     storage::sync::Storage::load_or_init(&ctx, "demo".into()).unwrap();
 }

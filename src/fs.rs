@@ -39,6 +39,7 @@ pub fn binary_update<T: Serialize>(
   data: T,
 ) -> Result<(), String> {
   let mut file = OpenOptions::new()
+    .create_new(true)
     .read(true)
     .write(true)
     .truncate(true)
@@ -56,6 +57,7 @@ pub fn binary_continuous_append<T: Serialize>(
   append_data: T,
 ) -> Result<(), String> {
   let mut file = std::fs::OpenOptions::new()
+    .create_new(true)
     .read(true)
     .write(true)
     .open(&path)
@@ -70,7 +72,10 @@ pub fn binary_init<T: Serialize + for<'de> Deserialize<'de>>(
   path: PathBuf,
   init_data: T,
 ) -> Result<T, String> {
-  std::fs::create_dir_all(&path)
+  // Get file parent folder
+  let parent = path.parent().unwrap();
+  // Create parent dirs
+  std::fs::create_dir_all(parent)
     .map_err(|_| format!("Error creating file: {:?}", &path))?;
   binary_update(path.clone(), init_data)?;
   let res = binary_read(path)?;
