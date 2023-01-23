@@ -3,7 +3,7 @@ use std::{
   fmt::Debug,
   ops::Deref,
   path::PathBuf,
-  sync::{Arc, Mutex},
+  sync::{Arc, Mutex, MutexGuard},
 };
 
 use chrono::{DateTime, Utc};
@@ -18,14 +18,31 @@ use crate::{
 /// Storage Context
 /// containing operational details
 /// such as db root path or uid
-#[derive(Clone)]
+pub struct ContextGuard {
+  mutex_guard: MutexGuard<'static, Context>,
+}
+
+impl Deref for ContextGuard {
+  type Target = Context;
+
+  fn deref(&self) -> &Self::Target {
+    self.mutex_guard.deref()
+  }
+}
+
+impl ContextGuard {
+  fn new(mutex_guard: MutexGuard<'static, Context>) -> Self {
+    Self { mutex_guard }
+  }
+}
+
 pub struct Context {
   pub db_root_path: PathBuf,
   pub uid: String,
 }
 
 impl Context {
-  pub fn new(db_root_path: PathBuf, uid: String) -> Self {
+  fn init(db_root_path: PathBuf, uid: String) -> Self {
     Self { db_root_path, uid }
   }
 }
@@ -265,7 +282,7 @@ where
   // If Patch returns error, we return it back to the caller
   fn create_action_object(
     &self,
-    ctx: &Context,
+    ctx: &ContextGuard,
     commit: &Commit,
     action: ActionKind<T, A>,
   ) -> Result<ActionObject<T, A>, String> {
@@ -296,7 +313,7 @@ where
   fn add_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
+    ctx: &ContextGuard,
   ) -> Result<&T, String> {
     if action_object.is_local() {
       return self.add_local_action_object(action_object, ctx);
@@ -308,7 +325,7 @@ where
   fn add_local_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
+    ctx: &ContextGuard,
   ) -> Result<&T, String> {
     // Check if action object is local
     if action_object.is_remote() {
@@ -354,7 +371,7 @@ where
   fn add_remote_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
+    ctx: &ContextGuard,
   ) -> Result<&T, String> {
     // Check if action object is a remote one
     if !action_object.is_remote() {
@@ -409,14 +426,14 @@ where
   }
   // Init storage object from FS
   fn read_from_fs(
-    ctx: &Context,
+    ctx: &ContextGuard,
     storage_id: &str,
     object_id: Uuid,
   ) -> Result<Self, String> {
     binary_read(path_helper::storage_object_path(ctx, storage_id, object_id))
   }
   // Update storage object file
-  fn save_to_fs(&self, ctx: &Context) -> Result<(), String> {
+  fn save_to_fs(&self, ctx: &ContextGuard) -> Result<(), String> {
     let object_path =
       path_helper::storage_object_path(ctx, &self.storage_id, self.id);
     binary_update(object_path, &self)
@@ -467,7 +484,7 @@ where
   /// Based on its data it can pull itself, or init itself
   /// as a local repository with initial data
   pub fn load_or_init(
-    ctx: &Context,
+    ctx: &ContextGuard,
     storage_id: String,
   ) -> Result<Self, String> {
     let storage_details_path =
@@ -495,7 +512,7 @@ where
   // Get a single storage object by id
   pub fn get_object_by_id(
     &self,
-    ctx: &Context,
+    ctx: &ContextGuard,
     object_id: Uuid,
   ) -> Result<StorageObject<T, A>, String> {
     // Check whether id is member
@@ -520,7 +537,7 @@ where
   // Get All
   pub fn get_all(
     &self,
-    ctx: &Context,
+    ctx: &ContextGuard,
   ) -> Result<Vec<StorageObject<T, A>>, String> {
     let ids = self.inner.lock().unwrap().member_ids.clone();
     let mut res = Vec::new();
@@ -533,7 +550,7 @@ where
   // Get by filter
   pub fn get_by_filter(
     &self,
-    ctx: &Context,
+    ctx: &ContextGuard,
     filter: impl Fn(&T) -> bool,
   ) -> Result<Vec<StorageObject<T, A>>, String> {
     let ids = self.inner.lock().unwrap().member_ids.clone();
@@ -550,7 +567,7 @@ where
   // Add action object to storage object
   pub fn add_action_object(
     &self,
-    ctx: &Context,
+    ctx: &ContextGuard,
     action_object: ActionObject<T, A>,
   ) -> Result<T, String> {
     let object_id = action_object.object_id;
@@ -583,11 +600,11 @@ where
 
   /// Register a callback to a given repository
   /// Repository will use this callback to update storage
-  pub fn register<'a: 'static>(
-    &'a self,
-    ctx: Context,
+  pub fn register(
+    self,
+    ctx: ContextGuard,
     repository: &Repository,
-  ) -> Result<(), String> {
+  ) -> Result<Self, String> {
     let _self = self.clone();
     repository.add_storage_hook(Box::new(
       move |aobstr: &str| -> Option<Result<(), String>> {
@@ -605,7 +622,7 @@ where
         None
       },
     ))?;
-    Ok(())
+    Ok(_self)
   }
 }
 
@@ -648,7 +665,7 @@ impl CommitLog {
     binary_init(path_helper::commit_log(ctx), Self::default())?;
     Ok(())
   }
-  fn load(ctx: &Context) -> Result<Self, String> {
+  fn load(ctx: &ContextGuard) -> Result<Self, String> {
     binary_read(path_helper::commit_log(ctx))
   }
 }
@@ -663,13 +680,13 @@ impl RepoDetails {
     binary_init(path_helper::repo_details(ctx), RepoDetails { mode })?;
     Ok(())
   }
-  fn load(ctx: &Context) -> Result<Self, String> {
+  fn load(ctx: &ContextGuard) -> Result<Self, String> {
     binary_read(path_helper::repo_details(ctx))
   }
 }
 
 pub struct RepoData {
-  ctx: Context,
+  ctx: Mutex<Context>,
   commit_log: CommitLog,
   repo_details: RepoDetails,
   storage_hooks: Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>,
@@ -693,13 +710,13 @@ impl Repository {
   /// Load repository
   pub fn load(ctx: Context) -> Result<Self, String> {
     // Load commit log
-    let commit_log = CommitLog::load(&ctx)?;
+    let commit_log = CommitLog::load(ctx.deref())?;
     // Load repo details
     let repo_details = RepoDetails::load(&ctx)?;
     // Create res
     let res = Self {
       inner: Arc::new(Mutex::new(RepoData {
-        ctx,
+        ctx: Mutex::new(ctx),
         commit_log,
         repo_details,
         storage_hooks: vec![],
@@ -720,7 +737,7 @@ impl Repository {
     // Create res
     let res = Self {
       inner: Arc::new(Mutex::new(RepoData {
-        ctx,
+        ctx: Mutex::new(ctx),
         commit_log,
         repo_details,
         storage_hooks: vec![],
@@ -736,5 +753,10 @@ impl Repository {
     hook: Box<dyn Fn(&str) -> Option<Result<(), String>>>,
   ) -> Result<(), String> {
     self.inner.lock().unwrap().add_storage_hook(hook)
+  }
+  pub fn ctx(&self) -> ContextGuard {
+    Self {
+      inner: self.inner.lock().unwrap().ctx.lock().unwrap(),
+    }
   }
 }

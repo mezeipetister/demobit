@@ -18,10 +18,10 @@ pub mod path_helper {
 
   use uuid::Uuid;
 
-  use crate::sync::Context;
+  use crate::sync::{Context, ContextGuard};
 
   pub fn storage_object_path(
-    ctx: &Context,
+    ctx: &ContextGuard,
     storage_id: &str,
     object_id: Uuid,
   ) -> PathBuf {
