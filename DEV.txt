@@ -71,3 +71,26 @@ Filesystem (FS)
           *D Object_IDXX
           *D Object_IDXX
           *D Object_IDxx
+
+
+---
+
+let repo = Repository::load()?;
+let a = Storage::load("a")?.register(&repo)?;
+let b = Storage::load("b")?.register(&repo)?;
+let c = Storage::load("c")?.register(&repo)?;
+
+repo.watch()?;
+
+let data = Data {
+  repo,
+  a,
+  b,
+  c
+}
+
+fn action_a(&self) -> Result<(), String> {
+  let commit = self.data.repo.commit("Example commit")?;
+  self.data.a.find_one(|i| i.id == "demo_a")?.patch(ActionA::UpdateName("New name"), &commit)?;
+  self.data.b.find_one(|i| i.id == "demo_b")?.patch(ActionB::UpdateAge(42), &commit)?;
+}
