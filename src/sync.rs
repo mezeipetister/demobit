@@ -133,7 +133,7 @@ where
   }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Commit {
   id: Uuid,
   uid: String,
@@ -154,11 +154,10 @@ impl Commit {
       serialized_actions: vec![],
     }
   }
-  fn add_action_object(&mut self, aob: impl Serialize) -> Result<(), String> {
+  fn add_action_object(&mut self, aob: impl Serialize) {
     self
       .serialized_actions
       .push(serde_json::to_string(&aob).unwrap());
-    Ok(())
   }
   fn set_dtime(&mut self) {
     self.dtime = Utc::now()
@@ -206,6 +205,19 @@ where
   T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
   A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de>,
 {
+  pub fn patch(
+    &self,
+    action: A,
+    commit: &mut CommitContextGuard,
+  ) -> Result<(), String> {
+    let aob = self.create_action_object(
+      &commit.ctx,
+      &commit.temp_commit,
+      ActionKind::Patch(action),
+    )?;
+    commit.add_action_object(aob);
+    Ok(())
+  }
   fn new_from_aob(aob: ActionObject<T, A>) -> Result<Self, String> {
     if let ActionKind::Create(data) = aob.action.clone() {
       let res = match aob.is_local() {
@@ -558,6 +570,23 @@ where
     Ok(res)
   }
 
+  pub fn create_object(&self, data: T, commit: &mut CommitContextGuard) {
+    let object_signature = sha1_signature(&data).unwrap();
+    let aob: ActionObject<T, A> = ActionObject {
+      id: Uuid::new_v4(),
+      storage_id: self.storage_id(),
+      object_id: Uuid::new_v4(),
+      uid: commit.ctx.uid.to_string(),
+      dtime: Utc::now(),
+      commit_id: None,
+      parent_action_id: None,
+      action: ActionKind::Create(data),
+      object_signature,
+      remote_signature: None,
+    };
+    commit.add_action_object(aob);
+  }
+
   // Add action object to storage object
   pub fn add_action_object(
     &self,
@@ -691,6 +720,21 @@ impl<'a> CommitContextGuard<'a> {
       temp_commit: Commit::new(uid, commit_comment.to_string()),
     }
   }
+  pub fn add_action_object<
+    T: ObjectExt + Serialize,
+    A: ActionExt + Serialize,
+  >(
+    &mut self,
+    aob: ActionObject<T, A>,
+  ) {
+    let _ = self.temp_commit.add_action_object(aob);
+  }
+}
+
+impl<'a> Drop for CommitContextGuard<'a> {
+  fn drop(&mut self) {
+    println!("{:?}", &self.temp_commit);
+  }
 }
 
 /// Commit Log
@@ -787,5 +831,11 @@ impl Repository {
   pub fn ctx<'a>(&'a self) -> ContextGuard {
     let mutex_guard = (&self.ctx).lock().unwrap();
     ContextGuard { mutex_guard }
+  }
+  pub fn commit_ctx<'a>(
+    &'a self,
+    commit_comment: &str,
+  ) -> CommitContextGuard<'a> {
+    CommitContextGuard::new(self, commit_comment)
   }
 }

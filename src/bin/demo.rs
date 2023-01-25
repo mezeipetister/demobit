@@ -60,12 +60,20 @@ impl AppData {
     Self { repo, a, b }
   }
   fn a_set_name(&self) -> Result<(), String> {
-    let ctx = self.repo.ctx();
-    let all = self.a.get_all(&ctx)?;
-    for i in all {
-      let object = i.deref();
-      println!("{:?}", object);
-    }
+    let mut ctx = self.repo.commit_ctx("Demo commit");
+    // let all = self.a.get_all(&ctx)?;
+    // for i in all {
+    //   let object = i.deref();
+    //   println!("{:?}", object);
+    // }
+    self.a.create_object(
+      User {
+        id: 1,
+        name: "Peti".into(),
+        age: 34,
+      },
+      &mut ctx,
+    );
     Ok(())
   }
 }
