@@ -37,7 +37,7 @@ pub trait ObjectExt: Debug + Clone {}
 /// Generic acion representation
 /// Atomic action kinds with the following states:
 /// Create, Patch, Remove, Recover
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 enum ActionKind<T, A>
 where
   T: ObjectExt,
@@ -52,7 +52,7 @@ where
 
 /// ActionObject must be produced by a StorageObject
 /// By providing a &Commit and an A: impl ActionExt to it.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ActionObject<T, A>
 where
   T: ObjectExt,
@@ -167,7 +167,7 @@ impl Commit {
   }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct StorageObject<T, A>
 where
   T: ObjectExt,
@@ -203,7 +203,7 @@ where
 impl<T, A> StorageObject<T, A>
 where
   T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
-  A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de>,
+  A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de> + Debug,
 {
   pub fn patch(
     &self,
@@ -222,7 +222,7 @@ where
     if let ActionKind::Create(data) = aob.action.clone() {
       let res = match aob.is_local() {
         true => Self {
-          id: aob.id,
+          id: aob.object_id,
           storage_id: aob.storage_id.clone(),
           remote_actions: vec![],
           local_actions: vec![aob],
@@ -230,7 +230,7 @@ where
           local_object: data,
         },
         false => Self {
-          id: aob.id,
+          id: aob.object_id,
           storage_id: aob.storage_id.clone(),
           remote_actions: vec![aob],
           local_actions: vec![],
@@ -447,7 +447,7 @@ where
 
 /// Generic Storage that can hold Vec<T>
 /// and perform patch A operations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Storage<T, A>
 where
   T: ObjectExt,
@@ -468,7 +468,7 @@ where
   }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct StorageInner<T, A>
 where
   T: ObjectExt,
@@ -482,8 +482,11 @@ where
 impl<T, A> Storage<T, A>
 where
   T: ObjectExt + Serialize + for<'de> Deserialize<'de> + 'static,
-  A:
-    ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de> + 'static,
+  A: ActionExt<ObjectType = T>
+    + Serialize
+    + for<'de> Deserialize<'de>
+    + 'static
+    + Debug,
 {
   /// Init a storage by providing a repository object
   /// Based on its data it can pull itself, or init itself
@@ -609,6 +612,8 @@ where
         );
         // Init in FS and save its content as binary
         binary_init(path, new_storage_object)?;
+        // Add new object ID as storage member ID
+        self.inner.lock().unwrap().member_ids.push(object_id);
         // Return data
         data
       }
@@ -619,6 +624,13 @@ where
         .clone(),
     };
     Ok(data)
+  }
+
+  fn update_fs(&self, ctx: &Context) -> Result<(), String> {
+    binary_update(
+      path_helper::storage_details_path(ctx, &self.storage_id()),
+      self.inner.lock().unwrap().deref(),
+    )
   }
 
   /// Register a callback to a given repository
@@ -635,7 +647,10 @@ where
             return None;
           }
           match self.add_action_object(&ctx, aob) {
-            Ok(_) => return Some(Ok(())),
+            Ok(_) => {
+              let res = self.update_fs(&ctx);
+              return Some(res);
+            }
             Err(e) => return Some(Err(e)),
           };
         }
@@ -648,7 +663,7 @@ where
 
 // Repository Mode
 // Local, Remote or Server
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Mode {
   Server { port_number: usize },
   Remote { remote_url: String },
@@ -733,13 +748,21 @@ impl<'a> CommitContextGuard<'a> {
 
 impl<'a> Drop for CommitContextGuard<'a> {
   fn drop(&mut self) {
-    println!("{:?}", &self.temp_commit);
+    for aob_str in &self.temp_commit.serialized_actions {
+      for hook in self.storage_hooks.deref() {
+        let res = hook(aob_str);
+        if res.is_some() {
+          println!("{:?}", res);
+          break;
+        }
+      }
+    }
   }
 }
 
 /// Commit Log
 /// contains all the repository related logs
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 pub struct CommitLog {
   // Contains the remote commit log
   remote: Vec<Commit>,
@@ -760,7 +783,7 @@ impl CommitLog {
   }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct RepoDetails {
   mode: Mode,
 }

@@ -15,7 +15,7 @@ struct User {
 
 impl ObjectExt for User {}
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 enum UserAction {
   SetName(String),
   SetAge(i32),
@@ -60,20 +60,24 @@ impl AppData {
     Self { repo, a, b }
   }
   fn a_set_name(&self) -> Result<(), String> {
-    let mut ctx = self.repo.commit_ctx("Demo commit");
-    // let all = self.a.get_all(&ctx)?;
-    // for i in all {
-    //   let object = i.deref();
-    //   println!("{:?}", object);
-    // }
-    self.a.create_object(
-      User {
-        id: 1,
-        name: "Peti".into(),
-        age: 34,
-      },
-      &mut ctx,
-    );
+    let ctx = self.repo.ctx();
+    let all = self.a.get_all(&ctx)?;
+    println!("{:?}", &self.a);
+    for i in all {
+      let object = i.deref();
+      println!("{:?}", object);
+    }
+
+    // let mut ctx = self.repo.commit_ctx("Demo commit");
+    // self.a.create_object(
+    //   User {
+    //     id: 1,
+    //     name: "Peti".into(),
+    //     age: 34,
+    //   },
+    //   &mut ctx,
+    // );
+
     Ok(())
   }
 }
@@ -95,6 +99,7 @@ fn main() {
       .unwrap()
       .register(&repo)
       .unwrap();
+
   let b: Storage<User, UserAction> =
     storage::sync::Storage::load_or_init(&repo, "demo_b".into())
       .unwrap()

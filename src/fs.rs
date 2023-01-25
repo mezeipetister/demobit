@@ -3,6 +3,16 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+fn deserialize<T: for<'de> Deserialize<'de>>(c: &Vec<u8>) -> Result<T, String> {
+  // Ok(bincode::deserialize(&c).map_err(|e| e.to_string())?)
+  serde_json::from_slice(c).map_err(|e| e.to_string())
+}
+
+fn serialize(data: impl Serialize) -> Result<Vec<u8>, String> {
+  // bincode::serialize(&data).map_err(|e| e.to_string())
+  serde_json::to_vec(&data).map_err(|e| e.to_string())
+}
+
 pub fn binary_read<T: for<'de> Deserialize<'de>>(
   path: PathBuf,
 ) -> Result<T, String> {
@@ -13,7 +23,7 @@ pub fn binary_read<T: for<'de> Deserialize<'de>>(
     .map_err(|_| format!("No binary file found: {:?}", &path))?;
   let mut contents = vec![];
   file.read_to_end(&mut contents).map_err(|e| e.to_string())?;
-  Ok(bincode::deserialize(&contents).map_err(|e| e.to_string())?)
+  deserialize(&contents)
 }
 
 pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
@@ -34,19 +44,16 @@ pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
   Ok(res)
 }
 
-pub fn binary_update<T: Serialize>(
+pub fn binary_update<T: Serialize + core::fmt::Debug>(
   path: PathBuf,
   data: T,
 ) -> Result<(), String> {
   let mut file = OpenOptions::new()
-    .create_new(true)
-    .read(true)
     .write(true)
-    .truncate(true)
     .open(&path)
     .map_err(|_| format!("No bin file found to update: {:?}", &path))?;
   file
-    .write_all(&bincode::serialize(&data).map_err(|e| e.to_string())?)
+    .write_all(&serialize(data)?)
     .map_err(|e| e.to_string())?;
   file.flush().map_err(|e| e.to_string())?;
   Ok(())
@@ -68,7 +75,9 @@ pub fn binary_continuous_append<T: Serialize>(
   Ok(())
 }
 
-pub fn binary_init<T: Serialize + for<'de> Deserialize<'de>>(
+pub fn binary_init<
+  T: Serialize + for<'de> Deserialize<'de> + core::fmt::Debug,
+>(
   path: PathBuf,
   init_data: T,
 ) -> Result<T, String> {
@@ -76,7 +85,10 @@ pub fn binary_init<T: Serialize + for<'de> Deserialize<'de>>(
   let parent = path.parent().unwrap();
   // Create parent dirs
   std::fs::create_dir_all(parent)
-    .map_err(|_| format!("Error creating file: {:?}", &path))?;
+    .map_err(|_| format!("Error creating file parent folder: {:?}", &path))?;
+  std::fs::File::create(&path)
+    .map_err(|_| format!("Error creating file with path: {:?}", &path))?;
+  println!("init file: {:?}", &path);
   binary_update(path.clone(), init_data)?;
   let res = binary_read(path)?;
   Ok(res)
