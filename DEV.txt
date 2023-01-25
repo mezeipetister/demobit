@@ -93,4 +93,5 @@ fn action_a(&self) -> Result<(), String> {
   let commit = self.data.repo.commit("Example commit")?;
   self.data.a.find_one(|i| i.id == "demo_a")?.patch(ActionA::UpdateName("New name"), &commit)?;
   self.data.b.find_one(|i| i.id == "demo_b")?.patch(ActionB::UpdateAge(42), &commit)?;
+  commit.apply()
 }

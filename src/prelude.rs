@@ -21,7 +21,7 @@ pub mod path_helper {
   use crate::sync::{Context, ContextGuard};
 
   pub fn storage_object_path(
-    ctx: &ContextGuard,
+    ctx: &Context,
     storage_id: &str,
     object_id: Uuid,
   ) -> PathBuf {

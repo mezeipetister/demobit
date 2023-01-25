@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::{ops::Deref, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use storage::{
-  sync::{ActionExt, ContextGuard, ObjectExt, Repository, Storage},
+  sync::{ActionExt, Context, ContextGuard, ObjectExt, Repository, Storage},
   *,
 };
 
@@ -45,9 +45,34 @@ impl ActionExt for UserAction {
   }
 }
 
+struct AppData {
+  repo: Repository,
+  a: Storage<User, UserAction>,
+  b: Storage<User, UserAction>,
+}
+
+impl AppData {
+  fn new(
+    repo: Repository,
+    a: Storage<User, UserAction>,
+    b: Storage<User, UserAction>,
+  ) -> Self {
+    Self { repo, a, b }
+  }
+  fn a_set_name(&self) -> Result<(), String> {
+    let ctx = self.repo.ctx();
+    let all = self.a.get_all(&ctx)?;
+    for i in all {
+      let object = i.deref();
+      println!("{:?}", object);
+    }
+    Ok(())
+  }
+}
+
 fn main() {
-  // Demo Context
-  let ctx = ContextGuard::new(PathBuf::from("./data"), "mezeipetister".into());
+  // Init Demo Context
+  let ctx = Context::init(PathBuf::from("./data"), "mezeipetister".into());
 
   // Init repo
   // let repo: Repository =
@@ -55,12 +80,20 @@ fn main() {
 
   // Load repo
   let repo: Repository = Repository::load(ctx).unwrap();
-  let ctx = repo.
 
   // Init storage
   let a: Storage<User, UserAction> =
-    storage::sync::Storage::load_or_init(&ctx, "demo".into())
+    storage::sync::Storage::load_or_init(&repo, "demo_a".into())
       .unwrap()
-      .register(ctx, &repo)
+      .register(&repo)
       .unwrap();
+  let b: Storage<User, UserAction> =
+    storage::sync::Storage::load_or_init(&repo, "demo_b".into())
+      .unwrap()
+      .register(&repo)
+      .unwrap();
+
+  let app_data = AppData::new(repo, a, b);
+
+  app_data.a_set_name().unwrap();
 }
