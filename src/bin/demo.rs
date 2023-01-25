@@ -62,7 +62,6 @@ impl AppData {
   fn a_set_name(&self) -> Result<(), String> {
     let ctx = self.repo.ctx();
     let all = self.a.get_all(&ctx)?;
-    println!("{:?}", &self.a);
     for i in all {
       let object = i.deref();
       println!("{:?}", object);

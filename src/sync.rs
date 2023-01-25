@@ -752,7 +752,6 @@ impl<'a> Drop for CommitContextGuard<'a> {
       for hook in self.storage_hooks.deref() {
         let res = hook(aob_str);
         if res.is_some() {
-          println!("{:?}", res);
           break;
         }
       }
