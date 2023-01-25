@@ -59,23 +59,40 @@ impl AppData {
   ) -> Self {
     Self { repo, a, b }
   }
-  fn a_set_name(&self) -> Result<(), String> {
+
+  fn a_get_by_id(&self) -> Result<(), String> {
+    let ctx = self.repo.ctx();
+    let res = self
+      .a
+      .get_by_filter(&ctx, |i| i.id == 1)?
+      .first()
+      .unwrap()
+      .deref()
+      .to_owned();
+    println!("{:?}", res);
+    Ok(())
+  }
+
+  fn a_get_name(&self) -> Result<(), String> {
     let ctx = self.repo.ctx();
     let all = self.a.get_all(&ctx)?;
     for i in all {
       let object = i.deref();
       println!("{:?}", object);
     }
+    Ok(())
+  }
 
-    // let mut ctx = self.repo.commit_ctx("Demo commit");
-    // self.a.create_object(
-    //   User {
-    //     id: 1,
-    //     name: "Peti".into(),
-    //     age: 34,
-    //   },
-    //   &mut ctx,
-    // );
+  fn a_set_name(&self) -> Result<(), String> {
+    let mut ctx = self.repo.commit_ctx("Demo commit");
+    self.a.create_object(
+      User {
+        id: 1,
+        name: "Peti".into(),
+        age: 34,
+      },
+      &mut ctx,
+    );
 
     Ok(())
   }
@@ -107,5 +124,7 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  app_data.a_set_name().unwrap();
+  // app_data.a_set_name().unwrap();
+  // app_data.a_get_name().unwrap();
+  app_data.a_get_by_id().unwrap();
 }
