@@ -143,6 +143,31 @@ pub struct Commit {
   serialized_actions: Vec<String>, // ActionObject JSONs in Vec
 }
 
+impl Commit {
+  fn new(uid: String, comment: String) -> Self {
+    Self {
+      id: Uuid::new_v4(),
+      uid,
+      dtime: Utc::now(),
+      comment,
+      ancestor_id: Uuid::default(),
+      serialized_actions: vec![],
+    }
+  }
+  fn add_action_object(&mut self, aob: impl Serialize) -> Result<(), String> {
+    self
+      .serialized_actions
+      .push(serde_json::to_string(&aob).unwrap());
+    Ok(())
+  }
+  fn set_dtime(&mut self) {
+    self.dtime = Utc::now()
+  }
+  fn set_ancestor_id(&mut self, ancestor_id: Uuid) {
+    self.ancestor_id = ancestor_id;
+  }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct StorageObject<T, A>
 where
@@ -643,6 +668,28 @@ pub struct Context {
 impl Context {
   pub fn init(db_root_path: PathBuf, uid: String) -> Self {
     Self { db_root_path, uid }
+  }
+}
+
+pub struct CommitContextGuard<'a> {
+  ctx: MutexGuard<'a, Context>,
+  commit_log: MutexGuard<'a, CommitLog>,
+  repo_details: MutexGuard<'a, RepoDetails>,
+  storage_hooks:
+    MutexGuard<'a, Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>,
+  temp_commit: Commit,
+}
+
+impl<'a> CommitContextGuard<'a> {
+  fn new(repo: &'a Repository, commit_comment: &str) -> Self {
+    let uid = repo.ctx.lock().unwrap().uid.to_string();
+    Self {
+      ctx: repo.ctx.lock().unwrap(),
+      commit_log: repo.commit_log.lock().unwrap(),
+      repo_details: repo.repo_details.lock().unwrap(),
+      storage_hooks: repo.storage_hooks.lock().unwrap(),
+      temp_commit: Commit::new(uid, commit_comment.to_string()),
+    }
   }
 }
 
