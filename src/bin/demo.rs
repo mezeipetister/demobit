@@ -73,7 +73,7 @@ impl AppData {
     Ok(())
   }
 
-  fn a_get_name(&self) -> Result<(), String> {
+  fn a_get_all(&self) -> Result<(), String> {
     let ctx = self.repo.ctx();
     let all = self.a.get_all(&ctx)?;
     for i in all {
@@ -83,17 +83,26 @@ impl AppData {
     Ok(())
   }
 
-  fn a_set_name(&self) -> Result<(), String> {
+  fn a_create(&self, id: u32) -> Result<(), String> {
     let mut ctx = self.repo.commit_ctx("Demo commit");
     self.a.create_object(
       User {
-        id: 1,
+        id,
         name: "Peti".into(),
         age: 34,
       },
       &mut ctx,
     );
 
+    Ok(())
+  }
+
+  fn a_set_age(&self) -> Result<(), String> {
+    // let ctx = self.repo.ctx();
+    let mut ctx = self.repo.commit_ctx("Demo commit");
+    self
+      .a
+      .patch_by_filter(&mut ctx, |i| i.id == 1, UserAction::SetAge(7))?;
     Ok(())
   }
 }
@@ -103,11 +112,11 @@ fn main() {
   let ctx = Context::init(PathBuf::from("./data"), "mezeipetister".into());
 
   // Init repo
-  // let repo: Repository =
-  //   Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
+  let repo: Repository =
+    Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
 
   // Load repo
-  let repo: Repository = Repository::load(ctx).unwrap();
+  // let repo: Repository = Repository::load(ctx).unwrap();
 
   // Init storage
   let a: Storage<User, UserAction> =
@@ -124,7 +133,8 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  // app_data.a_set_name().unwrap();
+  // app_data.a_create(2).unwrap();
+  // app_data.a_set_age().unwrap();
   // app_data.a_get_name().unwrap();
-  app_data.a_get_by_id().unwrap();
+  app_data.a_get_all().unwrap();
 }

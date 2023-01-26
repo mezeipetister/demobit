@@ -573,6 +573,20 @@ where
     Ok(res)
   }
 
+  // Get by filter
+  pub fn patch_by_filter(
+    &self,
+    ctx: &mut CommitContextGuard,
+    filter: impl Fn(&T) -> bool,
+    patch: A,
+  ) -> Result<(), String> {
+    let res = self.get_by_filter(ctx, filter)?;
+    for r in res {
+      r.patch(patch.clone(), ctx)?;
+    }
+    Ok(())
+  }
+
   pub fn create_object(&self, data: T, commit: &mut CommitContextGuard) {
     let object_signature = sha1_signature(&data).unwrap();
     let aob: ActionObject<T, A> = ActionObject {
@@ -722,6 +736,14 @@ pub struct CommitContextGuard<'a> {
   storage_hooks:
     MutexGuard<'a, Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>,
   temp_commit: Commit,
+}
+
+impl<'a> Deref for CommitContextGuard<'a> {
+  type Target = MutexGuard<'a, Context>;
+
+  fn deref(&self) -> &Self::Target {
+    &self.ctx
+  }
 }
 
 impl<'a> CommitContextGuard<'a> {
