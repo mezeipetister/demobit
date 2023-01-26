@@ -167,7 +167,7 @@ impl Commit {
   }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StorageObject<T, A>
 where
   T: ObjectExt,
@@ -554,6 +554,23 @@ where
       res.push(self.get_object_by_id(ctx, id)?);
     }
     Ok(res)
+  }
+
+  // Get by filter
+  pub fn get_first_by_filter(
+    &self,
+    ctx: &Context,
+    filter: impl Fn(&T) -> bool,
+  ) -> Result<StorageObject<T, A>, String> {
+    let ids = self.inner.lock().unwrap().member_ids.clone();
+    let mut res = Vec::new();
+    for id in ids {
+      let so = self.get_object_by_id(ctx, id)?;
+      if filter(&so) {
+        res.push(so);
+      }
+    }
+    res.first().cloned().ok_or("Object not found".into())
   }
 
   // Get by filter
