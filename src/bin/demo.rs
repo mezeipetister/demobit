@@ -133,11 +133,11 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  // app_data.a_create(2).unwrap();
+  app_data.a_create(1).unwrap();
   // app_data.a_set_age().unwrap();
   // app_data.a_get_name().unwrap();
 
   let ctx = app_data.repo.ctx();
-  let a = app_data.a.get_first_by_filter(&ctx, |i| i.id == 1).unwrap();
-  println!("{:?}", a);
+  // let a = app_data.a.get_first_by_filter(&ctx, |i| i.id == 1).unwrap();
+  // println!("{:?}", a);
 }

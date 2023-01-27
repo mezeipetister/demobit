@@ -3,14 +3,49 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+enum mode {
+  Json,
+  Binary,
+}
+
+// Debug only
+const FS_MODE: mode = mode::Json;
+
 fn deserialize<T: for<'de> Deserialize<'de>>(c: &Vec<u8>) -> Result<T, String> {
-  // Ok(bincode::deserialize(&c).map_err(|e| e.to_string())?)
-  serde_json::from_slice(c).map_err(|e| e.to_string())
+  match FS_MODE {
+    mode::Json => serde_json::from_slice(c).map_err(|e| e.to_string()),
+    mode::Binary => bincode::deserialize(&c).map_err(|e| e.to_string()),
+  }
 }
 
 fn serialize(data: impl Serialize) -> Result<Vec<u8>, String> {
-  // bincode::serialize(&data).map_err(|e| e.to_string())
-  serde_json::to_vec(&data).map_err(|e| e.to_string())
+  match FS_MODE {
+    mode::Json => serde_json::to_vec(&data).map_err(|e| e.to_string()),
+    mode::Binary => bincode::serialize(&data).map_err(|e| e.to_string()),
+  }
+}
+
+fn serialize_into(
+  file: impl std::io::Write,
+  append_data: impl Serialize,
+) -> Result<(), String> {
+  match FS_MODE {
+    mode::Json => {
+      serde_json::to_writer(file, &append_data).map_err(|e| e.to_string())
+    }
+    mode::Binary => {
+      bincode::serialize_into(file, &append_data).map_err(|e| e.to_string())
+    }
+  }
+}
+
+fn deserialize_from<T: for<'de> Deserialize<'de>>(
+  f: impl std::io::Read,
+) -> Result<T, String> {
+  match FS_MODE {
+    mode::Json => serde_json::from_reader(f).map_err(|e| e.to_string()),
+    mode::Binary => bincode::deserialize_from(f).map_err(|e| e.to_string()),
+  }
 }
 
 pub fn binary_read<T: for<'de> Deserialize<'de>>(
@@ -34,7 +69,7 @@ pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
   let f = std::fs::File::open(&path)
     .map_err(|_| format!("No binary file found: {:?}", path))?;
   loop {
-    match bincode::deserialize_from(&f) {
+    match deserialize_from(&f) {
       Ok(r) => res.push(r),
       Err(_) => {
         break;
@@ -64,13 +99,11 @@ pub fn binary_continuous_append<T: Serialize>(
   append_data: T,
 ) -> Result<(), String> {
   let mut file = std::fs::OpenOptions::new()
-    .create_new(true)
-    .read(true)
     .write(true)
+    .append(true)
     .open(&path)
     .map_err(|_| format!("No continuous file found to append: {:?}", &path))?;
-  file.seek(SeekFrom::End(0)).unwrap();
-  bincode::serialize_into(&file, &append_data).map_err(|e| e.to_string())?;
+  serialize_into(&file, &append_data)?;
   file.flush().map_err(|e| e.to_string())?;
   Ok(())
 }
@@ -88,8 +121,18 @@ pub fn binary_init<
     .map_err(|_| format!("Error creating file parent folder: {:?}", &path))?;
   std::fs::File::create(&path)
     .map_err(|_| format!("Error creating file with path: {:?}", &path))?;
-  println!("init file: {:?}", &path);
   binary_update(path.clone(), init_data)?;
   let res = binary_read(path)?;
   Ok(res)
+}
+
+pub fn binary_init_empty(path: PathBuf) -> Result<(), String> {
+  // Get file parent folder
+  let parent = path.parent().unwrap();
+  // Create parent dirs
+  std::fs::create_dir_all(parent)
+    .map_err(|_| format!("Error creating file parent folder: {:?}", &path))?;
+  std::fs::File::create(&path)
+    .map_err(|_| format!("Error creating file with path: {:?}", &path))?;
+  Ok(())
 }

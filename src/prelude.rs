@@ -36,10 +36,17 @@ pub mod path_helper {
     ctx.db_root_path.join("storage_details").join(storage_id)
   }
 
-  pub fn commit_log(ctx: &Context) -> PathBuf {
-    ctx.db_root_path.join("commit_log")
+  pub fn commit_latest(ctx: &Context) -> PathBuf {
+    ctx.db_root_path.join("commit_latest")
   }
 
+  pub fn commit_local_log(ctx: &Context) -> PathBuf {
+    ctx.db_root_path.join("commit_local_log")
+  }
+
+  pub fn commit_remote_log(ctx: &Context) -> PathBuf {
+    ctx.db_root_path.join("commit_remote_log")
+  }
   pub fn repo_details(ctx: &Context) -> PathBuf {
     ctx.db_root_path.join("repo_details")
   }

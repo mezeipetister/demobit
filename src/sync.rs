@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-  fs::{binary_init, binary_read, binary_update},
+  fs::{
+    binary_continuous_append, binary_continuous_read, binary_init,
+    binary_init_empty, binary_read, binary_update,
+  },
   prelude::{path_helper, sha1_signature},
 };
 
@@ -133,7 +136,7 @@ where
   }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Commit {
   id: Uuid,
   uid: String,
@@ -141,6 +144,7 @@ pub struct Commit {
   comment: String,
   ancestor_id: Uuid,
   serialized_actions: Vec<String>, // ActionObject JSONs in Vec
+  remote_signature: Option<String>,
 }
 
 impl Commit {
@@ -152,6 +156,7 @@ impl Commit {
       comment,
       ancestor_id: Uuid::default(),
       serialized_actions: vec![],
+      remote_signature: None,
     }
   }
   fn add_action_object(&mut self, aob: impl Serialize) {
@@ -633,6 +638,10 @@ where
       true => {
         // Create new storage object
         let new_storage_object = StorageObject::new_from_aob(action_object)?;
+        // Check storage id
+        if &self.storage_id() != &new_storage_object.storage_id {
+          panic!("Wrong storage id during creating storage object");
+        }
         // Get data
         let data = new_storage_object.local_object.clone();
         // Get Object path
@@ -787,6 +796,18 @@ impl<'a> CommitContextGuard<'a> {
 
 impl<'a> Drop for CommitContextGuard<'a> {
   fn drop(&mut self) {
+    match self.temp_commit.remote_signature.is_some() {
+      // Store remote commit
+      true => {
+        CommitLog::add_remote_commit(&self.ctx, self.temp_commit.clone())
+          .expect("Error adding remote commit to commit file");
+      }
+      // Store local commit
+      false => {
+        CommitLog::add_local_commit(&self.ctx, self.temp_commit.clone())
+          .expect("Error adding local commit to commit file");
+      }
+    }
     for aob_str in &self.temp_commit.serialized_actions {
       for hook in self.storage_hooks.deref() {
         let res = hook(aob_str);
@@ -801,23 +822,43 @@ impl<'a> Drop for CommitContextGuard<'a> {
 /// Commit Log
 /// contains all the repository related logs
 #[derive(Default, Serialize, Deserialize, Debug)]
-pub struct CommitLog {
-  // Contains the remote commit log
-  remote: Vec<Commit>,
-  // Contains the latest remote commit id by storage_id's
-  // HashMap<StorageId, LatestCommitId>
-  latest_remote: HashMap<String, Uuid>,
-  // Contains the local commit log
-  local: Vec<Commit>,
-}
+pub struct CommitLog;
 
 impl CommitLog {
   fn init(ctx: &Context) -> Result<(), String> {
-    binary_init(path_helper::commit_log(ctx), Self::default())?;
+    // Init latest log
+    // binary_init::<HashMap<String, Uuid>>(
+    //   path_helper::commit_latest(ctx),
+    //   HashMap::default(),
+    // )?;
+    // Init local log
+    binary_init_empty(path_helper::commit_local_log(ctx))?;
+    // Init remote log
+    binary_init_empty(path_helper::commit_remote_log(ctx))?;
     Ok(())
   }
-  fn load(ctx: &Context) -> Result<Self, String> {
-    binary_read(path_helper::commit_log(ctx))
+
+  fn load_locals(ctx: &Context) -> Result<Vec<Commit>, String> {
+    let locals = binary_continuous_read(path_helper::commit_local_log(ctx))?;
+    Ok(locals)
+  }
+  fn load_remotes(ctx: &Context) -> Result<Vec<Commit>, String> {
+    let remotes = binary_continuous_read(path_helper::commit_remote_log(ctx))?;
+    Ok(remotes)
+  }
+  fn add_local_commit(
+    ctx: &Context,
+    local_commit: Commit,
+  ) -> Result<(), String> {
+    // Save local commit
+    binary_continuous_append(path_helper::commit_local_log(ctx), local_commit)
+  }
+  fn add_remote_commit(
+    ctx: &Context,
+    local_commit: Commit,
+  ) -> Result<(), String> {
+    // Save remote commit
+    binary_continuous_append(path_helper::commit_remote_log(ctx), local_commit)
   }
 }
 
@@ -848,7 +889,7 @@ impl Repository {
   /// Load repository
   pub fn load(ctx: Context) -> Result<Self, String> {
     // Load commit log
-    let commit_log = CommitLog::load(&ctx)?;
+    let commit_log = CommitLog;
     // Load repo details
     let repo_details = RepoDetails::load(&ctx)?;
     // Create res
@@ -865,7 +906,7 @@ impl Repository {
     // Init commit log
     CommitLog::init(&ctx)?;
     // Load commit log
-    let commit_log = CommitLog::load(&ctx)?;
+    let commit_log = CommitLog;
     // Init repo details
     RepoDetails::init(&ctx, mode)?;
     // Load repo details
