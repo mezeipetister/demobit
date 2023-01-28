@@ -43,6 +43,13 @@ impl ActionExt for UserAction {
       }
     }
   }
+
+  fn display(&self) -> String {
+    match &self {
+      UserAction::SetName(n) => format!("SetName to {}", n),
+      UserAction::SetAge(a) => format!("SetAge to {}", a),
+    }
+  }
 }
 
 struct AppData {
@@ -134,10 +141,13 @@ fn main() {
   let app_data = AppData::new(repo, a, b);
 
   app_data.a_create(1).unwrap();
-  // app_data.a_set_age().unwrap();
+  app_data.a_set_age().unwrap();
   // app_data.a_get_name().unwrap();
 
-  let ctx = app_data.repo.ctx();
+  // let ctx = app_data.repo.ctx();
   // let a = app_data.a.get_first_by_filter(&ctx, |i| i.id == 1).unwrap();
   // println!("{:?}", a);
+
+  let local_log = app_data.repo.local_commits().unwrap();
+  println!("{:?}", local_log);
 }

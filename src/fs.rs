@@ -9,7 +9,7 @@ enum mode {
 }
 
 // Debug only
-const FS_MODE: mode = mode::Json;
+const FS_MODE: mode = mode::Binary;
 
 fn deserialize<T: for<'de> Deserialize<'de>>(c: &Vec<u8>) -> Result<T, String> {
   match FS_MODE {
@@ -66,9 +66,13 @@ pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
 ) -> Result<Vec<T>, String> {
   // Try open staging
   let mut res: Vec<T> = Vec::new();
-  let f = std::fs::File::open(&path)
+  let mut f = std::fs::File::open(&path)
     .map_err(|_| format!("No binary file found: {:?}", path))?;
+  f.seek(SeekFrom::Current(0)).unwrap();
+  let mut i = 0;
   loop {
+    println!("{}", i);
+    i += 1;
     match deserialize_from(&f) {
       Ok(r) => res.push(r),
       Err(_) => {

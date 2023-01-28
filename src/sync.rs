@@ -1,5 +1,4 @@
 use std::{
-  collections::HashMap,
   fmt::Debug,
   ops::Deref,
   path::PathBuf,
@@ -33,6 +32,10 @@ pub trait ActionExt: Clone {
     dtime: DateTime<Utc>,
     uid: &str,
   ) -> Result<Self::ObjectType, String>;
+  /// Human readable display msg
+  /// This can be used in UI to display
+  /// Patch actions
+  fn display(&self) -> String;
 }
 
 pub trait ObjectExt: Debug + Clone {}
@@ -136,6 +139,60 @@ where
   }
 }
 
+/// Universal Action Object
+/// Deserializing Action Object without any action kind
+#[derive(Deserialize)]
+pub struct UniversalActionObject {
+  // Unique ID
+  id: Uuid,
+  // Referred Storage ID
+  // Object must be located under it
+  storage_id: String,
+  // Referred ObjectId
+  // must be applied on it
+  object_id: Uuid,
+  // UserID
+  uid: String,
+  // Applied date and time in Utc
+  dtime: DateTime<Utc>,
+  // Related commit id
+  commit_id: Option<Uuid>,
+  // Object actions parent action id
+  // We can use this attribute to check action chain per storage object
+  parent_action_id: Option<Uuid>,
+  // Signature of the initial/patched object as json string
+  // Sha1
+  object_signature: String,
+  // Remote action object signature
+  // serialized (ActionObject as json) with none remote_signature
+  // Sha1
+  remote_signature: Option<String>,
+}
+
+impl UniversalActionObject {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+  fn object_id(&self) -> Uuid {
+    self.object_id
+  }
+  fn parent_action_id(&self) -> Option<Uuid> {
+    self.parent_action_id
+  }
+  fn object_signature(&self) -> &str {
+    &self.object_signature
+  }
+  fn remote_signature(&self) -> Option<&str> {
+    self.remote_signature.as_deref()
+  }
+  fn is_remote(&self) -> bool {
+    self.remote_signature.is_some()
+  }
+  fn is_local(&self) -> bool {
+    !self.is_remote()
+  }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Commit {
   id: Uuid,
@@ -144,7 +201,7 @@ pub struct Commit {
   comment: String,
   ancestor_id: Uuid,
   serialized_actions: Vec<String>, // ActionObject JSONs in Vec
-  remote_signature: Option<String>,
+  remote_signature: Option<String>, // Remote signature
 }
 
 impl Commit {
@@ -169,6 +226,31 @@ impl Commit {
   }
   fn set_ancestor_id(&mut self, ancestor_id: Uuid) {
     self.ancestor_id = ancestor_id;
+  }
+  fn is_remote(&self) -> bool {
+    self.remote_signature.is_some()
+  }
+  fn is_local(&self) -> bool {
+    !self.is_remote()
+  }
+  fn add_remote_signature(&mut self) -> Result<(), String> {
+    if self.is_remote() {
+      return Err("Commit already has remote signature!".into());
+    }
+    let signature = sha1_signature(&self)?;
+    self.remote_signature = Some(signature);
+    Ok(())
+  }
+  fn has_valid_remote_signature(&self) -> Result<bool, String> {
+    let mut copied = self.clone();
+    let sig1 = copied.remote_signature.take();
+    let sig2 = sha1_signature(&self)?;
+    if let Some(sig1) = sig1 {
+      if sig1 == sig2 {
+        return Ok(true);
+      }
+    }
+    Ok(false)
   }
 }
 
@@ -939,5 +1021,11 @@ impl Repository {
     commit_comment: &str,
   ) -> CommitContextGuard<'a> {
     CommitContextGuard::new(self, commit_comment)
+  }
+  pub fn local_commits(&self) -> Result<Vec<Commit>, String> {
+    CommitLog::load_locals(&self.ctx())
+  }
+  pub fn remote_commits(&self) -> Result<Vec<Commit>, String> {
+    CommitLog::load_remotes(&self.ctx())
   }
 }
