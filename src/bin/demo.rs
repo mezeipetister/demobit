@@ -90,6 +90,14 @@ impl AppData {
     Ok(())
   }
 
+  fn a_get_age(&self, id: u32) -> Result<i32, String> {
+    let ctx = self.repo.ctx();
+    self
+      .a
+      .get_first_by_filter(&ctx, |i| i.id == id)
+      .map(|i| i.age)
+  }
+
   fn a_create(&self, id: u32) -> Result<(), String> {
     let mut ctx = self.repo.commit_ctx("Demo commit");
     self.a.create_object(
@@ -104,12 +112,14 @@ impl AppData {
     Ok(())
   }
 
-  fn a_set_age(&self) -> Result<(), String> {
+  fn a_set_age(&self, id: u32, age: i32) -> Result<(), String> {
     // let ctx = self.repo.ctx();
     let mut ctx = self.repo.commit_ctx("Demo commit");
-    self
-      .a
-      .patch_by_filter(&mut ctx, |i| i.id == 1, UserAction::SetAge(7))?;
+    self.a.patch_by_filter(
+      &mut ctx,
+      |i| i.id == id,
+      UserAction::SetAge(age),
+    )?;
     Ok(())
   }
 }
@@ -119,11 +129,11 @@ fn main() {
   let ctx = Context::init(PathBuf::from("./data"), "mezeipetister".into());
 
   // Init repo
-  let repo: Repository =
-    Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
+  // let repo: Repository =
+  //   Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
 
   // Load repo
-  // let repo: Repository = Repository::load(ctx).unwrap();
+  let repo: Repository = Repository::load(ctx).unwrap();
 
   // Init storage
   let a: Storage<User, UserAction> =
@@ -140,14 +150,16 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  app_data.a_create(1).unwrap();
-  app_data.a_set_age().unwrap();
-  // app_data.a_get_name().unwrap();
+  // app_data.a_create(3).unwrap();
+  // app_data.a_set_age(1, 9).unwrap();
+  // app_data.a_set_age(2, 11).unwrap();
+  // let age = app_data.a_get_age(1).unwrap();
+  // println!("{}", age);
 
   // let ctx = app_data.repo.ctx();
   // let a = app_data.a.get_first_by_filter(&ctx, |i| i.id == 1).unwrap();
   // println!("{:?}", a);
 
   let local_log = app_data.repo.local_commits().unwrap();
-  println!("{:?}", local_log);
+  println!("{}", serde_json::to_string_pretty(&local_log).unwrap());
 }

@@ -69,10 +69,7 @@ pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
   let mut f = std::fs::File::open(&path)
     .map_err(|_| format!("No binary file found: {:?}", path))?;
   f.seek(SeekFrom::Current(0)).unwrap();
-  let mut i = 0;
   loop {
-    println!("{}", i);
-    i += 1;
     match deserialize_from(&f) {
       Ok(r) => res.push(r),
       Err(_) => {

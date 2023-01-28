@@ -292,6 +292,8 @@ where
   T: ObjectExt + Serialize + for<'de> Deserialize<'de>,
   A: ActionExt<ObjectType = T> + Serialize + for<'de> Deserialize<'de> + Debug,
 {
+  /// Create ActionObject from Action
+  /// and add it to the given Commit
   pub fn patch(
     &self,
     action: A,
@@ -305,6 +307,8 @@ where
     commit.add_action_object(aob);
     Ok(())
   }
+  // Create new Storage Object by providing a ActionKind::Create
+  // Action Object
   fn new_from_aob(aob: ActionObject<T, A>) -> Result<Self, String> {
     if let ActionKind::Create(data) = aob.action.clone() {
       let res = match aob.is_local() {
@@ -329,11 +333,26 @@ where
     }
     Err("Action Ojbect must be create kind".into())
   }
+  // Check wether StorageObject is only local
+  // True if no remote object
+  fn is_local_object(&self) -> bool {
+    self.remote_object.is_none()
+  }
+  // Check wether StorageObject is remote
+  // True if Some remote object
+  fn is_remote_object(&self) -> bool {
+    !self.is_local_object()
+  }
   // Clear all local changes
   // If object is local (no remote actions and object state)
   // we should not be here. That object should be removed without
   // clearing it.
   pub fn clear_local_changes(&mut self) -> Result<(), String> {
+    // Check if remote
+    assert!(
+      self.is_remote_object(),
+      "Only remote StorageObject can be cleared locally"
+    );
     // Clear all local actions
     self.local_actions.clear();
     // Set local data object to the remote one
@@ -343,11 +362,11 @@ where
   // Rebuild local objects
   // Only should use when remote update occurs
   fn rebuild_local_objects(&mut self) -> Result<(), String> {
-    // First set local object if we have remote on
+    // First set remote object as local one
     if let Some(remote_object) = &self.remote_object {
       self.local_object = remote_object.to_owned();
     } else {
-      return Err("Only remote object can be rebuild".into());
+      return Err("Only remote object can be rebuild".to_string());
     }
     // Re apply action objects and update their object signature & dtimes
     for action_object in &mut self.local_actions {
@@ -397,7 +416,7 @@ where
       parent_action_id: self.local_actions.last().map(|i| i.id),
       action,
       object_signature,
-      remote_signature: None,
+      remote_signature: None, // todo! This is really None always here? Can remote apply here?
     };
     Ok(res)
   }
@@ -677,7 +696,8 @@ where
     Ok(res)
   }
 
-  // Get by filter
+  /// Get by filter
+  /// Apply a given patch to result vec items
   pub fn patch_by_filter(
     &self,
     ctx: &mut CommitContextGuard,
@@ -691,6 +711,9 @@ where
     Ok(())
   }
 
+  /// Create a Create action object which will create
+  /// a new Storage Object
+  /// and adds it to a given Commit
   pub fn create_object(&self, data: T, commit: &mut CommitContextGuard) {
     let object_signature = sha1_signature(&data).unwrap();
     let aob: ActionObject<T, A> = ActionObject {
@@ -699,7 +722,7 @@ where
       object_id: Uuid::new_v4(),
       uid: commit.ctx.uid.to_string(),
       dtime: Utc::now(),
-      commit_id: None,
+      commit_id: Some(commit.temp_commit.id),
       parent_action_id: None,
       action: ActionKind::Create(data),
       object_signature,
