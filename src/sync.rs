@@ -924,6 +924,40 @@ impl<'a> Drop for CommitContextGuard<'a> {
   }
 }
 
+#[derive(Default, Serialize, Deserialize, Debug)]
+struct CommitIndex {
+  latest_local_commit_id: Option<Uuid>,
+  latest_remote_commit_id: Option<Uuid>,
+}
+
+impl CommitIndex {
+  fn latest_local_commit_id(&self) -> Option<Uuid> {
+    self.latest_local_commit_id
+  }
+  fn latest_remote_commit_id(&self) -> Option<Uuid> {
+    self.latest_local_commit_id
+  }
+  fn save_fs(&self, ctx: &Context) -> Result<(), String> {
+    binary_update(path_helper::commit_index(ctx), &self)
+  }
+  fn set_latest_local_id(
+    &mut self,
+    ctx: &Context,
+    latest_local: Option<Uuid>,
+  ) -> Result<(), String> {
+    self.latest_local_commit_id = latest_local;
+    self.save_fs(ctx)
+  }
+  fn set_latest_remote_id(
+    &mut self,
+    ctx: &Context,
+    latest_remote: Option<Uuid>,
+  ) -> Result<(), String> {
+    self.latest_remote_commit_id = latest_remote;
+    self.save_fs(ctx)
+  }
+}
+
 /// Commit Log
 /// contains all the repository related logs
 #[derive(Default, Serialize, Deserialize, Debug)]
@@ -940,7 +974,13 @@ impl CommitLog {
     binary_init_empty(path_helper::commit_local_log(ctx))?;
     // Init remote log
     binary_init_empty(path_helper::commit_remote_log(ctx))?;
+    // Init commit index
+    binary_init(path_helper::commit_index(ctx), CommitIndex::default())?;
     Ok(())
+  }
+
+  fn commit_index(ctx: &Context) -> Result<CommitIndex, String> {
+    binary_read(path_helper::commit_index(ctx))
   }
 
   fn load_locals(ctx: &Context) -> Result<Vec<Commit>, String> {
@@ -955,10 +995,13 @@ impl CommitLog {
     ctx: &Context,
     mut local_commit: Commit,
   ) -> Result<(), String> {
+    let mut commit_index = CommitLog::commit_index(ctx)?;
     // Set ancestor ID
-    if let Some(last_local_commit) = CommitLog::load_locals(ctx)?.last() {
-      local_commit.set_ancestor_id(last_local_commit.id);
+    if let Some(last_local_commit_id) = commit_index.latest_local_commit_id() {
+      local_commit.set_ancestor_id(last_local_commit_id);
     }
+    // Set commit index
+    commit_index.set_latest_local_id(ctx, Some(local_commit.id))?;
     // Save local commit
     binary_continuous_append(path_helper::commit_local_log(ctx), local_commit)
   }
@@ -966,12 +1009,16 @@ impl CommitLog {
     ctx: &Context,
     remote_commit: Commit,
   ) -> Result<(), String> {
+    let mut commit_index = CommitLog::commit_index(ctx)?;
     // check ancestor ID
-    if let Some(last_remote_commit) = CommitLog::load_remotes(ctx)?.last() {
-      if remote_commit.ancestor_id != last_remote_commit.id {
+    if let Some(last_remote_commit_id) = commit_index.latest_remote_commit_id()
+    {
+      if remote_commit.ancestor_id != last_remote_commit_id {
         return Err("Remote commit ancestor ID error! Please pull".into());
       }
     }
+    // Set commit index
+    commit_index.set_latest_remote_id(ctx, Some(remote_commit.id))?;
     // Save remote commit
     binary_continuous_append(path_helper::commit_remote_log(ctx), remote_commit)
   }

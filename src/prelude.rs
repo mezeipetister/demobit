@@ -36,6 +36,10 @@ pub mod path_helper {
     ctx.db_root_path.join("storage_details").join(storage_id)
   }
 
+  pub fn commit_index(ctx: &Context) -> PathBuf {
+    ctx.db_root_path.join("commit_index")
+  }
+
   pub fn commit_latest(ctx: &Context) -> PathBuf {
     ctx.db_root_path.join("commit_latest")
   }

@@ -9,7 +9,7 @@ enum mode {
 }
 
 // Debug only
-const FS_MODE: mode = mode::Json;
+const FS_MODE: mode = mode::Binary;
 
 fn deserialize<T: for<'de> Deserialize<'de>>(c: &Vec<u8>) -> Result<T, String> {
   match FS_MODE {
