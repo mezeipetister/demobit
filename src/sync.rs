@@ -624,7 +624,7 @@ where
     self.inner.lock().unwrap().id.to_owned()
   }
 
-  // Get a single storage object by id
+  // Get a single storage object by object id
   pub fn get_object_by_id(
     &self,
     ctx: &Context,
