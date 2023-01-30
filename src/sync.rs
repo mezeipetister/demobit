@@ -931,14 +931,23 @@ struct CommitIndex {
 }
 
 impl CommitIndex {
-  fn latest_local_commit_id(&self) -> Option<Uuid> {
-    self.latest_local_commit_id
+  fn init(ctx: &Context) {
+    binary_init(path_helper::commit_index(ctx), Self::default());
   }
-  fn latest_remote_commit_id(&self) -> Option<Uuid> {
-    self.latest_local_commit_id
+  fn load(ctx: &Context) -> Self {
+    binary_read(path_helper::commit_index(&ctx))
+      .expect("Error reading commit index")
   }
   fn save_fs(&self, ctx: &Context) -> Result<(), String> {
     binary_update(path_helper::commit_index(ctx), &self)
+  }
+  fn latest_local_commit_id(ctx: &Context) -> Option<Uuid> {
+    let s = Self::load(ctx);
+    s.latest_local_commit_id
+  }
+  fn latest_remote_commit_id(ctx: &Context) -> Option<Uuid> {
+    let s = Self::load(ctx);
+    s.latest_local_commit_id
   }
   fn set_latest_local_id(
     &mut self,
@@ -975,12 +984,8 @@ impl CommitLog {
     // Init remote log
     binary_init_empty(path_helper::commit_remote_log(ctx))?;
     // Init commit index
-    binary_init(path_helper::commit_index(ctx), CommitIndex::default())?;
+    CommitIndex::init(ctx);
     Ok(())
-  }
-
-  fn commit_index(ctx: &Context) -> Result<CommitIndex, String> {
-    binary_read(path_helper::commit_index(ctx))
   }
 
   fn load_locals(ctx: &Context) -> Result<Vec<Commit>, String> {
@@ -995,9 +1000,9 @@ impl CommitLog {
     ctx: &Context,
     mut local_commit: Commit,
   ) -> Result<(), String> {
-    let mut commit_index = CommitLog::commit_index(ctx)?;
+    let mut commit_index = CommitIndex::load(ctx);
     // Set ancestor ID
-    if let Some(last_local_commit_id) = commit_index.latest_local_commit_id() {
+    if let Some(last_local_commit_id) = commit_index.latest_local_commit_id {
       local_commit.set_ancestor_id(last_local_commit_id);
     }
     // Set commit index
@@ -1009,10 +1014,9 @@ impl CommitLog {
     ctx: &Context,
     remote_commit: Commit,
   ) -> Result<(), String> {
-    let mut commit_index = CommitLog::commit_index(ctx)?;
+    let mut commit_index = CommitIndex::load(ctx);
     // check ancestor ID
-    if let Some(last_remote_commit_id) = commit_index.latest_remote_commit_id()
-    {
+    if let Some(last_remote_commit_id) = commit_index.latest_remote_commit_id {
       if remote_commit.ancestor_id != last_remote_commit_id {
         return Err("Remote commit ancestor ID error! Please pull".into());
       }
