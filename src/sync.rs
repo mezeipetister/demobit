@@ -953,17 +953,27 @@ impl CommitLog {
   }
   fn add_local_commit(
     ctx: &Context,
-    local_commit: Commit,
+    mut local_commit: Commit,
   ) -> Result<(), String> {
+    // Set ancestor ID
+    if let Some(last_local_commit) = CommitLog::load_locals(ctx)?.last() {
+      local_commit.set_ancestor_id(last_local_commit.id);
+    }
     // Save local commit
     binary_continuous_append(path_helper::commit_local_log(ctx), local_commit)
   }
   fn add_remote_commit(
     ctx: &Context,
-    local_commit: Commit,
+    remote_commit: Commit,
   ) -> Result<(), String> {
+    // check ancestor ID
+    if let Some(last_remote_commit) = CommitLog::load_remotes(ctx)?.last() {
+      if remote_commit.ancestor_id != last_remote_commit.id {
+        return Err("Remote commit ancestor ID error! Please pull".into());
+      }
+    }
     // Save remote commit
-    binary_continuous_append(path_helper::commit_remote_log(ctx), local_commit)
+    binary_continuous_append(path_helper::commit_remote_log(ctx), remote_commit)
   }
 }
 
@@ -1008,6 +1018,10 @@ impl Repository {
   }
   /// Init repository
   pub fn init(ctx: Context, mode: Mode) -> Result<Self, String> {
+    // Check if repository inited
+    if Self::load(ctx.clone()).is_ok() {
+      return Err("Existing repository. Cannot init a new one".into());
+    }
     // Init commit log
     CommitLog::init(&ctx)?;
     // Load commit log
@@ -1024,6 +1038,23 @@ impl Repository {
       storage_hooks: Arc::new(Mutex::new(vec![])),
     };
     Ok(res)
+  }
+  // Clone remote repository to local
+  fn clone(remote_url: &str) -> Result<Self, String> {
+    unimplemented!()
+  }
+  /// Pull remote repository
+  pub fn pull(&self) -> Result<(), String> {
+    unimplemented!()
+  }
+  /// Push repository local commits to remote
+  pub fn push(&self) -> Result<(), String> {
+    unimplemented!()
+  }
+  /// Clean local repository, clear local changes
+  /// And performs remote pull
+  pub fn clean(&self) -> Result<(), String> {
+    unimplemented!()
   }
   // Private method to register
   // storage hooks

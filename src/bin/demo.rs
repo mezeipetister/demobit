@@ -132,6 +132,8 @@ fn main() {
   // let repo: Repository =
   //   Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
 
+  // return;
+
   // Load repo
   let repo: Repository = Repository::load(ctx).unwrap();
 
@@ -150,9 +152,9 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  // app_data.a_create(3).unwrap();
+  app_data.a_create(2).unwrap();
   // app_data.a_set_age(1, 9).unwrap();
-  // app_data.a_set_age(2, 11).unwrap();
+  app_data.a_set_age(2, 11).unwrap();
   // let age = app_data.a_get_age(1).unwrap();
   // println!("{}", age);
 
