@@ -950,20 +950,20 @@ impl CommitIndex {
     s.latest_local_commit_id
   }
   fn set_latest_local_id(
-    &mut self,
     ctx: &Context,
     latest_local: Option<Uuid>,
   ) -> Result<(), String> {
-    self.latest_local_commit_id = latest_local;
-    self.save_fs(ctx)
+    let mut s = Self::load(ctx);
+    s.latest_local_commit_id = latest_local;
+    s.save_fs(ctx)
   }
   fn set_latest_remote_id(
-    &mut self,
     ctx: &Context,
     latest_remote: Option<Uuid>,
   ) -> Result<(), String> {
-    self.latest_remote_commit_id = latest_remote;
-    self.save_fs(ctx)
+    let mut s = Self::load(ctx);
+    s.latest_remote_commit_id = latest_remote;
+    s.save_fs(ctx)
   }
 }
 
@@ -1000,13 +1000,13 @@ impl CommitLog {
     ctx: &Context,
     mut local_commit: Commit,
   ) -> Result<(), String> {
-    let mut commit_index = CommitIndex::load(ctx);
     // Set ancestor ID
-    if let Some(last_local_commit_id) = commit_index.latest_local_commit_id {
+    if let Some(last_local_commit_id) = CommitIndex::latest_local_commit_id(ctx)
+    {
       local_commit.set_ancestor_id(last_local_commit_id);
     }
     // Set commit index
-    commit_index.set_latest_local_id(ctx, Some(local_commit.id))?;
+    CommitIndex::set_latest_local_id(ctx, Some(local_commit.id))?;
     // Save local commit
     binary_continuous_append(path_helper::commit_local_log(ctx), local_commit)
   }
@@ -1022,7 +1022,7 @@ impl CommitLog {
       }
     }
     // Set commit index
-    commit_index.set_latest_remote_id(ctx, Some(remote_commit.id))?;
+    CommitIndex::set_latest_remote_id(ctx, Some(remote_commit.id))?;
     // Save remote commit
     binary_continuous_append(path_helper::commit_remote_log(ctx), remote_commit)
   }
