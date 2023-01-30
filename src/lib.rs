@@ -1,3 +1,4 @@
 mod fs;
-pub mod prelude;
+mod prelude;
+pub mod server;
 pub mod sync;

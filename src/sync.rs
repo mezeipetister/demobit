@@ -1092,6 +1092,12 @@ impl Repository {
   }
   // Clone remote repository to local
   fn clone(remote_url: &str) -> Result<Self, String> {
+    // TODO! Fix path and UID
+    let ctx = Context::init(PathBuf::from("./data"), "mezeipetister".into());
+    // Check if repository inited
+    if Self::load(ctx.clone()).is_ok() {
+      return Err("Existing repository. Cannot clone again".into());
+    }
     unimplemented!()
   }
   /// Pull remote repository
