@@ -808,7 +808,7 @@ where
 
 // Repository Mode
 // Local, Remote or Server
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Mode {
   Server { port_number: usize },
   Remote { remote_url: String },
@@ -1095,16 +1095,51 @@ impl Repository {
     unimplemented!()
   }
   /// Pull remote repository
-  pub fn pull(&self) -> Result<(), String> {
+  pub fn proceed_pull(&self) -> Result<(), String> {
+    match &self.repo_details.lock().unwrap().mode {
+      Mode::Remote { .. } => {}
+      _ => {
+        panic!("Cannot proceed pull operation, as the repository is not in remote mode")
+      }
+    }
     unimplemented!()
   }
   /// Push repository local commits to remote
-  pub fn push(&self) -> Result<(), String> {
+  pub fn proceed_push(&self) -> Result<(), String> {
+    match &self.repo_details.lock().unwrap().mode {
+      Mode::Remote { .. } => {}
+      _ => {
+        panic!("Cannot proceed push operation, as the repository is not in remote mode")
+      }
+    }
     unimplemented!()
   }
   /// Clean local repository, clear local changes
   /// And performs remote pull
-  pub fn clean(&self) -> Result<(), String> {
+  pub fn proceed_clean(&self) -> Result<(), String> {
+    unimplemented!()
+  }
+  /// Start watcher for remote client to watch
+  /// remote updates
+  pub fn watch(&self) -> Result<(), String> {
+    match &self.repo_details.lock().unwrap().mode {
+      Mode::Remote { .. } => {}
+      _ => {
+        panic!(
+          "Cannot start remote watch, as the repository is not in remote mode"
+        )
+      }
+    }
+    unimplemented!()
+  }
+  /// Start remote server
+  pub fn serve(&self) -> Result<(), String> {
+    match &self.repo_details.lock().unwrap().mode {
+      Mode::Server { port_number } => {}
+      _ => {
+        panic!("Cannot start server, as the repository is not in server mode")
+      }
+    }
     unimplemented!()
   }
   // Private method to register
