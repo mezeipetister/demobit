@@ -818,7 +818,10 @@ where
                   let res = self.update_fs(&ctx);
                   return Some(res);
                 }
-                CallbackMode::Check => Some(Ok::<(), String>(())),
+                CallbackMode::Check => {
+                  let res: Result<(), String> = Ok(());
+                  Some(res)
+                }
               }
             }
             Err(e) => return Some(Err(e)),
@@ -950,18 +953,14 @@ impl<'a> Drop for CommitContextGuard<'a> {
           .expect("Error adding local commit to commit file");
       }
     }
-    println!("Start apply");
     for aob_str in &self.temp_commit.serialized_actions {
-      println!("Iter. Hook count {}", self.storage_hooks.len());
       for hook in self.storage_hooks.deref() {
         let res = hook(aob_str, CallbackMode::Apply);
-        println!("Fs result {:?}", &res);
         if res.is_some() {
           break;
         }
       }
     }
-    println!("Drop finished");
   }
 }
 
@@ -1319,14 +1318,25 @@ impl Repository {
     // 3) Check all action objects (Ancestor + Action + Signature)
     let hooks = &ctx.storage_hooks;
     for aob_str in &commit.serialized_actions {
+      let mut found_hook = false;
       for hook in hooks.deref() {
         let res = hook(aob_str, CallbackMode::Check);
+        println!("{:?}", &res);
         if let Some(res) = res {
-          if let Err(e) = res {
-            return Err(e);
+          match res {
+            Ok(()) => {
+              found_hook = true;
+              println!("found hook is {}", found_hook);
+              break;
+            }
+            Err(e) => {
+              return Err(e);
+            }
           }
-          break;
         }
+      }
+      if !found_hook {
+        return Err("Unknown storage.".to_string());
       }
     }
 

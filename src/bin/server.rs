@@ -151,12 +151,12 @@ fn main() {
       .register(&repo)
       .unwrap();
 
-  let app_data = AppData::new(repo, a, b);
+  // let app_data = AppData::new(repo, a, b);
 
   // return;
 
   // Load repo
   // let repo: Repository = Repository::load(ctx).unwrap();
 
-  app_data.repo.serve().unwrap();
+  repo.serve().unwrap();
 }
