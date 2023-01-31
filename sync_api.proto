@@ -4,7 +4,7 @@ package sync_api;
 
 service Api {
   rpc Pull(PullRequest) returns (stream CommitObj);
-  rpc Push(stream CommitObj) returns (stream CommitObj);
+  rpc Push(CommitObj) returns (CommitObj);
 }
 
 message PullRequest { string after_commit_id = 1; }

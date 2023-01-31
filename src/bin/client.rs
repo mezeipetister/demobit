@@ -130,18 +130,19 @@ fn main() {
     Context::init(PathBuf::from("./data/client"), "mezeipetister".into());
 
   // Init repo
-  let repo: Repository = Repository::init(
-    ctx.clone(),
-    sync::Mode::Remote {
-      remote_url: "[::1]:50059".to_string(),
-    },
-  )
-  .unwrap();
-
-  // return;
+  // let repo: Repository = Repository::init(
+  //   ctx.clone(),
+  //   sync::Mode::Remote {
+  //     remote_url: "http://localhost:50059".to_string(),
+  //   },
+  // )
+  // .unwrap();
 
   // Load repo
   let repo: Repository = Repository::load(ctx).unwrap();
+
+  // repo.proceed_pull().unwrap();
+  // repo.proceed_push().unwrap();
 
   // Init storage
   let a: Storage<User, UserAction> =
@@ -158,9 +159,9 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  app_data.a_create(5).unwrap();
+  // app_data.a_create(1).unwrap();
   // app_data.a_set_age(1, 9).unwrap();
-  app_data.a_set_age(5, 11).unwrap();
+  // app_data.a_set_age(1, 11).unwrap();
   // let age = app_data.a_get_age(1).unwrap();
   // println!("{}", age);
 
@@ -168,6 +169,8 @@ fn main() {
   // let a = app_data.a.get_first_by_filter(&ctx, |i| i.id == 1).unwrap();
   // println!("{:?}", a);
 
-  let local_log = app_data.repo.local_commits().unwrap();
-  println!("{}", serde_json::to_string_pretty(&local_log).unwrap());
+  app_data.repo.proceed_push().unwrap();
+
+  // let local_log = app_data.repo.local_commits().unwrap();
+  // println!("{}", serde_json::to_string_pretty(&local_log).unwrap());
 }

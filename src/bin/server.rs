@@ -130,18 +130,33 @@ fn main() {
     Context::init(PathBuf::from("./data/server"), "mezeipetister".into());
 
   // Init repo
-  // let repo: Repository = Repository::init(
-  //   ctx.clone(),
-  //   sync::Mode::Server {
-  //     server_addr: "[::1]:50059".to_string(),
-  //   },
-  // )
-  // .unwrap();
+  let repo: Repository = Repository::init(
+    ctx.clone(),
+    sync::Mode::Server {
+      server_addr: "[::1]:50059".to_string(),
+    },
+  )
+  .unwrap();
+
+  // Init storage
+  let a: Storage<User, UserAction> =
+    storage::sync::Storage::load_or_init(&repo, "demo_a".into())
+      .unwrap()
+      .register(&repo)
+      .unwrap();
+
+  let b: Storage<User, UserAction> =
+    storage::sync::Storage::load_or_init(&repo, "demo_b".into())
+      .unwrap()
+      .register(&repo)
+      .unwrap();
+
+  let app_data = AppData::new(repo, a, b);
 
   // return;
 
   // Load repo
-  let repo: Repository = Repository::load(ctx).unwrap();
+  // let repo: Repository = Repository::load(ctx).unwrap();
 
-  repo.serve().unwrap();
+  app_data.repo.serve().unwrap();
 }

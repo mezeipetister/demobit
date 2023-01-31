@@ -55,36 +55,26 @@ impl Api for Repository {
     Ok(Response::new(ReceiverStream::new(rx)))
   }
 
-  type PushStream = ReceiverStream<Result<CommitObj, Status>>;
+  // type PushStream = ReceiverStream<Result<CommitObj, Status>>;
 
   async fn push(
     &self,
-    request: Request<tonic::Streaming<CommitObj>>, // Accept request of type HelloRequest
-  ) -> Result<Response<Self::PushStream>, Status> {
-    let mut stream = request.into_inner();
+    request: Request<CommitObj>, // Accept request of type HelloRequest
+  ) -> Result<Response<CommitObj>, Status> {
+    let commit_obj = request.into_inner();
 
-    let s = stream! {
-        while let Some(new_commit) = stream.next().await {
-          if let Ok(commit_obj) = new_commit {
-            if let Ok(res) = self.merge_pushed_commit(&commit_obj.obj_json_string) {
-              yield res;
-            }
-          }
-        }
+    let res = self
+      .merge_pushed_commit(&commit_obj.obj_json_string)
+      .unwrap();
+
+    // let (mut tx, rx) = tokio::sync::mpsc::channel(100);
+
+    let res = CommitObj {
+      obj_json_string: serde_json::to_string(&res).unwrap(),
     };
-
-    pin_mut!(s);
-
-    let (mut tx, rx) = tokio::sync::mpsc::channel(100);
-
-    while let Some(value) = s.next().await {
-      let res = CommitObj {
-        obj_json_string: serde_json::to_string(&value).unwrap(),
-      };
-      tx.send(Ok(res)).await.unwrap();
-    }
+    // tx.send(Ok(res)).await.unwrap();
 
     // Send back the receiver
-    Ok(Response::new(ReceiverStream::new(rx)))
+    Ok(Response::new(res))
   }
 }

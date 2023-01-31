@@ -6,8 +6,10 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use futures_util::stream;
 use serde::{Deserialize, Serialize};
-use tonic::transport::Server;
+use serde_json::Value;
+use tonic::{transport::Server, Request};
 use uuid::Uuid;
 
 use crate::{
@@ -17,7 +19,9 @@ use crate::{
     binary_read, binary_update,
   },
   prelude::{path_helper, sha1_signature},
-  server::sync_api::api_server::ApiServer,
+  server::sync_api::{
+    api_client::ApiClient, api_server::ApiServer, CommitObj, PullRequest,
+  },
 };
 
 /// Action trait for Actionable types
@@ -163,8 +167,8 @@ pub struct UniversalActionObject {
   // Object actions parent action id
   // We can use this attribute to check action chain per storage object
   parent_action_id: Option<Uuid>,
-  // Action as JSON string without deserialization
-  action: String,
+  // Action as AnyValue
+  action: Value,
   // Signature of the initial/patched object as json string
   // Sha1
   object_signature: String,
@@ -946,14 +950,18 @@ impl<'a> Drop for CommitContextGuard<'a> {
           .expect("Error adding local commit to commit file");
       }
     }
+    println!("Start apply");
     for aob_str in &self.temp_commit.serialized_actions {
+      println!("Iter. Hook count {}", self.storage_hooks.len());
       for hook in self.storage_hooks.deref() {
         let res = hook(aob_str, CallbackMode::Apply);
+        println!("Fs result {:?}", &res);
         if res.is_some() {
           break;
         }
       }
     }
+    println!("Drop finished");
   }
 }
 
@@ -1153,23 +1161,85 @@ impl Repository {
   }
   /// Pull remote repository
   pub fn proceed_pull(&self) -> Result<(), String> {
-    match &self.repo_details.lock().unwrap().mode {
-      Mode::Remote { .. } => {}
+    let remote_addr = match &self.repo_details.lock().unwrap().mode {
+      Mode::Remote { remote_url } => remote_url.to_string(),
       _ => {
         panic!("Cannot proceed pull operation, as the repository is not in remote mode")
       }
-    }
-    unimplemented!()
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .worker_threads(1)
+      .thread_name("sync_server")
+      .build()
+      .unwrap();
+
+    runtime.block_on(async {
+      let mut remote_client = ApiClient::connect(remote_addr)
+        .await
+        .expect("Could not connect to UPL service");
+
+      let mut res = remote_client
+        .pull(PullRequest {
+          after_commit_id: "".to_string(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+      let mut commits = vec![];
+
+      while let Some(commit) = res.message().await.unwrap() {
+        commits.push(commit);
+      }
+    });
+
+    Ok(())
   }
   /// Push repository local commits to remote
   pub fn proceed_push(&self) -> Result<(), String> {
-    match &self.repo_details.lock().unwrap().mode {
-      Mode::Remote { .. } => {}
+    let remote_addr = match &self.repo_details.lock().unwrap().mode {
+      Mode::Remote { remote_url } => remote_url.to_string(),
       _ => {
         panic!("Cannot proceed push operation, as the repository is not in remote mode")
       }
-    }
-    unimplemented!()
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .worker_threads(1)
+      .thread_name("sync_server")
+      .build()
+      .unwrap();
+
+    runtime.block_on(async {
+      let mut remote_client = ApiClient::connect(remote_addr)
+        .await
+        .expect("Could not connect to UPL service");
+
+      let local_commits = self
+        .local_commits()
+        .unwrap()
+        .into_iter()
+        .map(|c| CommitObj {
+          obj_json_string: serde_json::to_string(&c).unwrap(),
+        })
+        .collect::<Vec<CommitObj>>();
+
+      let mut commits = vec![];
+
+      for commit in local_commits {
+        println!("commitobj to send {:?}", &commit);
+        let mut commit = remote_client.push(commit).await.unwrap().into_inner();
+        println!("{:?}", &commit);
+        commits.push(commit);
+      }
+
+      println!("{:?}", commits);
+    });
+
+    Ok(())
   }
   /// Clean local repository, clear local changes
   /// And performs remote pull
@@ -1247,7 +1317,7 @@ impl Repository {
     }
 
     // 3) Check all action objects (Ancestor + Action + Signature)
-    let hooks = self.storage_hooks.lock().unwrap();
+    let hooks = &ctx.storage_hooks;
     for aob_str in &commit.serialized_actions {
       for hook in hooks.deref() {
         let res = hook(aob_str, CallbackMode::Check);
