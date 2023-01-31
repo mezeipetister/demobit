@@ -152,9 +152,9 @@ fn main() {
 
   let app_data = AppData::new(repo, a, b);
 
-  app_data.a_create(1).unwrap();
+  app_data.a_create(5).unwrap();
   // app_data.a_set_age(1, 9).unwrap();
-  app_data.a_set_age(1, 11).unwrap();
+  app_data.a_set_age(5, 11).unwrap();
   // let age = app_data.a_get_age(1).unwrap();
   // println!("{}", age);
 
