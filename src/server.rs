@@ -1,13 +1,14 @@
+use crate::sync::Repository;
+use async_stream::stream;
+use futures::pin_mut;
+use futures_util::stream::StreamExt;
 use std::pin::Pin;
-
 use sync_api::api_server::{Api, ApiServer};
 use sync_api::{CommitObj, PullRequest};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::codegen::futures_core::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
-
-use crate::sync::Repository;
 
 pub mod sync_api {
   tonic::include_proto!("sync_api");
@@ -43,14 +44,36 @@ impl Api for Repository {
     Ok(Response::new(ReceiverStream::new(rx)))
   }
 
-  type PushStream =
-    Pin<Box<dyn Stream<Item = Result<CommitObj, Status>> + Send>>;
+  type PushStream = ReceiverStream<Result<CommitObj, Status>>;
 
   async fn push(
     &self,
     request: Request<tonic::Streaming<CommitObj>>, // Accept request of type HelloRequest
   ) -> Result<Response<Self::PushStream>, Status> {
-    // Return an instance of type HelloReply
-    unimplemented!()
+    let mut stream = request.into_inner();
+
+    let s = stream! {
+        while let Some(new_commit) = stream.next().await {
+          if let Ok(commit_obj) = new_commit {
+            if let Ok(res) = self.merge_pushed_commit(&commit_obj.obj_json_string) {
+              yield res;
+            }
+          }
+        }
+    };
+
+    pin_mut!(s);
+
+    let (mut tx, rx) = tokio::sync::mpsc::channel(100);
+
+    while let Some(value) = s.next().await {
+      let res = CommitObj {
+        obj_json_string: serde_json::to_string(&value).unwrap(),
+      };
+      tx.send(Ok(res)).await.unwrap();
+    }
+
+    // Send back the receiver
+    Ok(Response::new(ReceiverStream::new(rx)))
   }
 }
