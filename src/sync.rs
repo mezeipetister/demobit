@@ -820,7 +820,7 @@ where
                 }
                 CallbackMode::Check => {
                   let res: Result<(), String> = Ok(());
-                  Some(res)
+                  return Some(res);
                 }
               }
             }
@@ -1321,12 +1321,10 @@ impl Repository {
       let mut found_hook = false;
       for hook in hooks.deref() {
         let res = hook(aob_str, CallbackMode::Check);
-        println!("{:?}", &res);
         if let Some(res) = res {
           match res {
             Ok(()) => {
               found_hook = true;
-              println!("found hook is {}", found_hook);
               break;
             }
             Err(e) => {
