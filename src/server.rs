@@ -26,9 +26,20 @@ impl Api for Repository {
     let (mut tx, rx) = tokio::sync::mpsc::channel(100);
 
     // Get resources as Vec<SourceObject>
-    let after_id =
-      Uuid::parse_str(&request.into_inner().after_commit_id).unwrap();
-    let res = self.remote_commits_after(after_id).unwrap();
+    let commit_id_str = &request.into_inner().after_commit_id;
+
+    let res = match commit_id_str.len() > 0 {
+      true => {
+        let after_id = Uuid::parse_str(commit_id_str)
+          .map_err(|_| Status::invalid_argument("Wrong commit_id format"))?;
+        self.remote_commits_after(after_id).map_err(|_| {
+          Status::invalid_argument("Error collection remote logs")
+        })?
+      }
+      false => self.remote_commits().map_err(|_| {
+        Status::invalid_argument("Error collecting remote logs")
+      })?,
+    };
 
     // Send the result items through the channel
     tokio::spawn(async move {
