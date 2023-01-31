@@ -19,7 +19,7 @@ use crate::{
 
 /// Action trait for Actionable types
 /// Implemented types can be used as storage patch objects.
-pub trait ActionExt: Clone {
+pub trait ActionExt: Clone + Send {
   /// Action can work with this
   /// type
   type ObjectType;
@@ -38,7 +38,7 @@ pub trait ActionExt: Clone {
   fn display(&self) -> String;
 }
 
-pub trait ObjectExt: Debug + Clone {}
+pub trait ObjectExt: Debug + Clone + Send {}
 
 /// Generic acion representation
 /// Atomic action kinds with the following states:
@@ -884,7 +884,7 @@ pub struct CommitContextGuard<'a> {
   repo_details: MutexGuard<'a, RepoDetails>,
   storage_hooks: MutexGuard<
     'a,
-    Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>>,
+    Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>> + Send>>,
   >,
   temp_commit: Commit,
 }
@@ -1083,7 +1083,9 @@ pub struct Repository {
   commit_log: Arc<Mutex<CommitLog>>,
   repo_details: Arc<Mutex<RepoDetails>>,
   storage_hooks: Arc<
-    Mutex<Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>>>,
+    Mutex<
+      Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>> + Send>>,
+    >,
   >,
 }
 
@@ -1270,7 +1272,7 @@ impl Repository {
   // Storage update process will occur via these hooks (callbacks)
   fn add_storage_hook(
     &self,
-    hook: Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>,
+    hook: Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>> + Send>,
   ) -> Result<(), String> {
     self.storage_hooks.lock().unwrap().push(hook);
     Ok(())
@@ -1284,9 +1286,6 @@ impl Repository {
     commit_comment: &str,
   ) -> CommitContextGuard<'a> {
     CommitContextGuard::new(self, commit_comment)
-  }
-  fn merge_commit_ctx<'a>(&'a self, commit: Commit) -> CommitContextGuard<'a> {
-    CommitContextGuard::new_merge(self, commit)
   }
   pub fn local_commits(&self) -> Result<Vec<Commit>, String> {
     CommitLog::load_locals(&self.ctx())
