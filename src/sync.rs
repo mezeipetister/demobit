@@ -434,20 +434,18 @@ where
   fn add_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
-  ) -> Result<&T, String> {
+  ) -> Result<Self, String> {
     if action_object.is_local() {
-      return self.add_local_action_object(action_object, ctx);
+      return self.add_local_action_object(action_object);
     } else {
-      return self.add_remote_action_object(action_object, ctx);
+      return self.add_remote_action_object(action_object);
     }
   }
   // Add local action object to Storage Object
   fn add_local_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
-  ) -> Result<&T, String> {
+  ) -> Result<Self, String> {
     // Check if action object is local
     if action_object.is_remote() {
       return Err(
@@ -481,9 +479,9 @@ where
       // Insert action object
       self.local_actions.push(action_object);
       // Save to fs
-      self.save_to_fs(ctx)?;
-      // Return patched data as ref
-      return Ok(&self.local_object);
+      // self.save_to_fs(ctx)?;
+      // Return patched StorageObject as ref
+      return Ok(self.to_owned());
     }
     Err("Patch must have Patch action kind!".into())
   }
@@ -492,8 +490,7 @@ where
   fn add_remote_action_object(
     &mut self,
     action_object: ActionObject<T, A>,
-    ctx: &Context,
-  ) -> Result<&T, String> {
+  ) -> Result<Self, String> {
     // Check if action object is a remote one
     if !action_object.is_remote() {
       return Err("Only remote action object can be added here".into());
@@ -537,11 +534,11 @@ where
       // Rebuild local action objects
       self.rebuild_local_objects()?;
       // Save to FS
-      self.save_to_fs(ctx)?;
+      // self.save_to_fs(ctx)?;
       // Return current local object
       // Important! We return LOCAL, as its the latest version of our
       // data object.
-      return Ok(&self.local_object);
+      return Ok(self.to_owned());
     }
     Err("Patch must have Patch action kind!".into())
   }
@@ -746,7 +743,7 @@ where
     &self,
     ctx: &Context,
     action_object: ActionObject<T, A>,
-  ) -> Result<T, String> {
+  ) -> Result<StorageObject<T, A>, String> {
     let object_id = action_object.object_id;
     // Create a new one
     let data = match action_object.is_kind_create() {
@@ -758,7 +755,7 @@ where
           panic!("Wrong storage id during creating storage object");
         }
         // Get data
-        let data = new_storage_object.local_object.clone();
+        let data = new_storage_object.clone();
         // Get Object path
         let path = path_helper::storage_object_path(
           ctx,
@@ -775,7 +772,7 @@ where
       // Try to patch existing one
       false => self
         .get_object_by_id(ctx, object_id)?
-        .add_action_object(action_object, ctx)?
+        .add_action_object(action_object)?
         .clone(),
     };
     Ok(data)
@@ -792,40 +789,30 @@ where
   /// Repository will use this callback to update storage
   pub fn register(self, repo: &Repository) -> Result<Self, String> {
     let _self = self.clone();
-    let self1 = self.clone();
     let ctx = repo.ctx().deref().to_owned();
-    let ctx2 = ctx.to_owned();
-    repo.add_storage_check_hook(Box::new(
-      move |aobstr: &str| -> Option<Result<(), String>> {
-        // Try to deserialize action object
-        if let Ok(aob) = serde_json::from_str::<ActionObject<T, A>>(aobstr) {
-          // Check if storage target is ok
-          if &aob.storage_id != &self1.storage_id() {
-            return None;
-          }
-          match self1.add_action_object(&ctx, aob) {
-            Ok(_) => {
-              let res = self1.update_fs(&ctx);
-              return Some(res);
-            }
-            Err(e) => return Some(Err(e.to_string())),
-          };
-        }
-        None
-      },
-    ))?;
     repo.add_storage_hook(Box::new(
-      move |aobstr: &str| -> Option<Result<(), String>> {
+      move |aobstr: &str,
+            callback_mode: CallbackMode|
+            -> Option<Result<(), String>> {
         // Try to deserialize action object
         if let Ok(aob) = serde_json::from_str::<ActionObject<T, A>>(aobstr) {
           // Check if storage target is ok
           if &aob.storage_id != &self.storage_id() {
             return None;
           }
-          match self.add_action_object(&ctx2, aob) {
-            Ok(_) => {
-              let res = self.update_fs(&ctx2);
-              return Some(res);
+          match self.add_action_object(&ctx, aob) {
+            Ok(aob) => {
+              // Save updated storage object if needed
+              match callback_mode {
+                CallbackMode::Apply => {
+                  aob
+                    .save_to_fs(&ctx)
+                    .expect("Error writing StorageObject update to fs");
+                  let res = self.update_fs(&ctx);
+                  return Some(res);
+                }
+                CallbackMode::Check => Some(Ok::<(), String>(())),
+              }
             }
             Err(e) => return Some(Err(e)),
           };
@@ -895,10 +882,10 @@ pub struct CommitContextGuard<'a> {
   ctx: MutexGuard<'a, Context>,
   commit_log: MutexGuard<'a, CommitLog>,
   repo_details: MutexGuard<'a, RepoDetails>,
-  storage_hooks:
-    MutexGuard<'a, Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>,
-  storage_check_hooks:
-    MutexGuard<'a, Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>,
+  storage_hooks: MutexGuard<
+    'a,
+    Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>>,
+  >,
   temp_commit: Commit,
 }
 
@@ -918,7 +905,6 @@ impl<'a> CommitContextGuard<'a> {
       commit_log: repo.commit_log.lock().unwrap(),
       repo_details: repo.repo_details.lock().unwrap(),
       storage_hooks: repo.storage_hooks.lock().unwrap(),
-      storage_check_hooks: repo.storage_check_hooks.lock().unwrap(),
       temp_commit: Commit::new(uid, commit_comment.to_string()),
     }
   }
@@ -929,7 +915,6 @@ impl<'a> CommitContextGuard<'a> {
       commit_log: repo.commit_log.lock().unwrap(),
       repo_details: repo.repo_details.lock().unwrap(),
       storage_hooks: repo.storage_hooks.lock().unwrap(),
-      storage_check_hooks: repo.storage_check_hooks.lock().unwrap(),
       temp_commit,
     }
   }
@@ -960,7 +945,7 @@ impl<'a> Drop for CommitContextGuard<'a> {
     }
     for aob_str in &self.temp_commit.serialized_actions {
       for hook in self.storage_hooks.deref() {
-        let res = hook(aob_str);
+        let res = hook(aob_str, CallbackMode::Apply);
         if res.is_some() {
           break;
         }
@@ -1088,14 +1073,18 @@ impl RepoDetails {
   }
 }
 
+enum CallbackMode {
+  Check,
+  Apply,
+}
+
 pub struct Repository {
   ctx: Arc<Mutex<Context>>,
   commit_log: Arc<Mutex<CommitLog>>,
   repo_details: Arc<Mutex<RepoDetails>>,
-  storage_hooks:
-    Arc<Mutex<Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>>,
-  storage_check_hooks:
-    Arc<Mutex<Vec<Box<dyn Fn(&str) -> Option<Result<(), String>>>>>>,
+  storage_hooks: Arc<
+    Mutex<Vec<Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>>>,
+  >,
 }
 
 impl Repository {
@@ -1111,7 +1100,6 @@ impl Repository {
       commit_log: Arc::new(Mutex::new(commit_log)),
       repo_details: Arc::new(Mutex::new(repo_details)),
       storage_hooks: Arc::new(Mutex::new(vec![])),
-      storage_check_hooks: Arc::new(Mutex::new(vec![])),
     };
     Ok(res)
   }
@@ -1135,7 +1123,6 @@ impl Repository {
       commit_log: Arc::new(Mutex::new(commit_log)),
       repo_details: Arc::new(Mutex::new(repo_details)),
       storage_hooks: Arc::new(Mutex::new(vec![])),
-      storage_check_hooks: Arc::new(Mutex::new(vec![])),
     };
     Ok(res)
   }
@@ -1188,11 +1175,14 @@ impl Repository {
     unimplemented!()
   }
   /// Merge pushed commit to remote one
-  /// Returns signed remote Commit if success
+  /// Returns the applied & signed remote Commit if success
   pub fn merge_pushed_commit(
     &self,
     commit_json_str: &str,
   ) -> Result<Commit, String> {
+    // Lock itself
+    let mut ctx = self.commit_ctx("");
+
     // 1) Check Commit
     // Deserialize commit object
     let mut commit: Commit = serde_json::from_str(commit_json_str)
@@ -1204,8 +1194,7 @@ impl Repository {
           .to_string(),
       );
     }
-    // Lock itself
-    let ctx = self.ctx();
+
     // Check ancestor
     if let Some(latest_remote_commit_id) =
       CommitIndex::latest_remote_commit_id(&ctx)
@@ -1220,8 +1209,10 @@ impl Repository {
       }
     }
 
+    // 2) Sign all action objects
+
     // Deserialize action objects as universal aob
-    let mut action_objects = vec![];
+    let mut action_objects: Vec<UniversalActionObject> = vec![];
     for aob in &commit.serialized_actions {
       action_objects.push(
         serde_json::from_str(aob).map_err(|_| {
@@ -1229,16 +1220,38 @@ impl Repository {
         })?,
       );
     }
-    // 2) Check all action objects (Ancestor + Action + Signature)
-    // 3) Sign all action objects
-    // 4) ReCreate commit with signature and signed ActionObject
 
-    // Manually drop read only repository context
-    drop(ctx);
+    // Clear action objects
+    commit.serialized_actions = vec![];
+
+    for mut uaob in action_objects {
+      // Sign action object to be a remote one
+      uaob.remote_sign()?;
+      // Add action object back again
+      commit.add_action_object(uaob);
+    }
+
+    // 3) Check all action objects (Ancestor + Action + Signature)
+    let hooks = self.storage_hooks.lock().unwrap();
+    for aob_str in &commit.serialized_actions {
+      for hook in hooks.deref() {
+        let res = hook(aob_str, CallbackMode::Check);
+        if let Some(res) = res {
+          if let Err(e) = res {
+            return Err(e);
+          }
+          break;
+        }
+      }
+    }
+
+    // 4) ReCreate commit with signature and signed ActionObject
+    commit.add_remote_signature()?;
+
     // 5) Add commit as remote commit
     //    merge_commit_ctx will create a merge commit context with the
     //    prepared commit, and it will auto merge into remote as merge_commit_ctx drops
-    let _ = self.merge_commit_ctx(commit.clone());
+    ctx.temp_commit = commit.clone();
     // 6) Return remote commit
     Ok(commit)
   }
@@ -1257,19 +1270,9 @@ impl Repository {
   // Storage update process will occur via these hooks (callbacks)
   fn add_storage_hook(
     &self,
-    hook: Box<dyn Fn(&str) -> Option<Result<(), String>>>,
+    hook: Box<dyn Fn(&str, CallbackMode) -> Option<Result<(), String>>>,
   ) -> Result<(), String> {
     self.storage_hooks.lock().unwrap().push(hook);
-    Ok(())
-  }
-  // Private method to register
-  // storage CHECK hooks
-  // Storage update check process will occur via these hooks (callbacks)
-  fn add_storage_check_hook(
-    &self,
-    hook: Box<dyn Fn(&str) -> Option<Result<(), String>>>,
-  ) -> Result<(), String> {
-    self.storage_check_hooks.lock().unwrap().push(hook);
     Ok(())
   }
   pub fn ctx<'a>(&'a self) -> ContextGuard {
