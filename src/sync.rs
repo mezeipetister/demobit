@@ -888,6 +888,16 @@ impl<'a> CommitContextGuard<'a> {
       temp_commit: Commit::new(uid, commit_comment.to_string()),
     }
   }
+  // Use only for server side merge request
+  fn new_merge(repo: &'a Repository, temp_commit: Commit) -> Self {
+    Self {
+      ctx: repo.ctx.lock().unwrap(),
+      commit_log: repo.commit_log.lock().unwrap(),
+      repo_details: repo.repo_details.lock().unwrap(),
+      storage_hooks: repo.storage_hooks.lock().unwrap(),
+      temp_commit,
+    }
+  }
   pub fn add_action_object<
     T: ObjectExt + Serialize,
     A: ActionExt + Serialize,
@@ -1138,6 +1148,51 @@ impl Repository {
     }
     unimplemented!()
   }
+  /// Merge pushed commit to remote one
+  /// Returns signed remote Commit if success
+  pub fn merge_pushed_commit(
+    &self,
+    commit_json_str: &str,
+  ) -> Result<Commit, String> {
+    // 1) Check Commit
+    // Deserialize commit object
+    let mut commit: Commit = serde_json::from_str(commit_json_str)
+      .map_err(|_| "Deser error during commit deser process".to_string())?;
+    // Check signature
+    if commit.remote_signature.is_some() {
+      return Err(
+        "Pushed commit has remote signature. Only local commits can be pushed!"
+          .to_string(),
+      );
+    }
+    // Lock itself
+    let ctx = self.ctx();
+    // Check ancestor
+    if let Some(latest_remote_commit_id) =
+      CommitIndex::latest_remote_commit_id(&ctx)
+    {
+      // Only if not first commit
+      if commit.ancestor_id != latest_remote_commit_id {
+        // Return error if ancestor id is wrong
+        return Err(
+          "Commit ancestor id erro. Local repo not up-to-date. Pull required."
+            .to_string(),
+        );
+      }
+    }
+    // 2) Check all action objects
+    // 3) Sign all action objects
+    // 4) ReCreate commit with signature and signed ActionObject
+
+    // Manually drop read only repository context
+    drop(ctx);
+    // 5) Add commit as remote commit
+    //    merge_commit_ctx will create a merge commit context with the
+    //    prepared commit, and it will auto merge into remote as merge_commit_ctx drops
+    let _ = self.merge_commit_ctx(commit.clone());
+    // 6) Return remote commit
+    Ok(commit)
+  }
   /// Start remote server
   pub fn serve(&self) -> Result<(), String> {
     match &self.repo_details.lock().unwrap().mode {
@@ -1167,6 +1222,9 @@ impl Repository {
     commit_comment: &str,
   ) -> CommitContextGuard<'a> {
     CommitContextGuard::new(self, commit_comment)
+  }
+  fn merge_commit_ctx<'a>(&'a self, commit: Commit) -> CommitContextGuard<'a> {
+    CommitContextGuard::new_merge(self, commit)
   }
   pub fn local_commits(&self) -> Result<Vec<Commit>, String> {
     CommitLog::load_locals(&self.ctx())

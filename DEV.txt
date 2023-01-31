@@ -95,3 +95,18 @@ fn action_a(&self) -> Result<(), String> {
   self.data.b.find_one(|i| i.id == "demo_b")?.patch(ActionB::UpdateAge(42), &commit)?;
   commit.apply()
 }
+
+Server Side push process
+------------------------
+
+1)  Check Commit (Ancestor commit, unsigned)
+    if ok
+2)  Check all ActionObject (Ancestor + Action + Signature)
+    if ok
+3)  Sign all ActionObjects
+    if ok
+4)  ReCreate Commit with signature and signed ActionObjects
+    if ok
+5)  Add commit is usual (it will act as adding remote commit)
+    if ok (should be)
+6)  Return remote Commit
