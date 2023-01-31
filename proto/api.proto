@@ -3,14 +3,9 @@ syntax = "proto3";
 package sync_api;
 
 service Api {
-  rpc Clone(HelloRequest) returns (HelloReply);
-  rpc Pull(HelloRequest) returns (HelloReply);
-  rpc Push(HelloRequest) returns (HelloReply);
-  rpc Watch(HelloRequest) returns (stream HelloReply);
+  rpc Pull(PullRequest) returns (stream CommitObj);
+  rpc Push(stream CommitObj) returns (stream CommitObj);
 }
 
-// The request message containing the user's name.
-message HelloRequest { string name = 1; }
-
-// The response message containing the greetings
-message HelloReply { string message = 1; }
+message PullRequest { string after_commit_id = 1; }
+message CommitObj { string obj_json_string = 1; }
