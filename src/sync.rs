@@ -7,14 +7,17 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tonic::transport::Server;
 use uuid::Uuid;
 
 use crate::{
   fs::{
-    binary_continuous_append, binary_continuous_read, binary_init,
-    binary_init_empty, binary_read, binary_update,
+    binary_continuous_append, binary_continuous_read,
+    binary_continuous_read_after_filter, binary_init, binary_init_empty,
+    binary_read, binary_update,
   },
   prelude::{path_helper, sha1_signature},
+  server::sync_api::api_server::ApiServer,
 };
 
 /// Action trait for Actionable types
@@ -828,14 +831,14 @@ where
 // Local, Remote or Server
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum Mode {
-  Server { port_number: usize },
+  Server { server_addr: String },
   Remote { remote_url: String },
   Local,
 }
 
 impl Mode {
-  pub fn server(port_number: usize) -> Self {
-    Self::Server { port_number }
+  pub fn server(server_addr: String) -> Self {
+    Self::Server { server_addr }
   }
   pub fn remote(remote_url: String) -> Self {
     Self::Remote { remote_url }
@@ -1024,6 +1027,16 @@ impl CommitLog {
   }
   fn load_remotes(ctx: &Context) -> Result<Vec<Commit>, String> {
     let remotes = binary_continuous_read(path_helper::commit_remote_log(ctx))?;
+    Ok(remotes)
+  }
+  fn load_remotes_after(
+    ctx: &Context,
+    after_id: Uuid,
+  ) -> Result<Vec<Commit>, String> {
+    let remotes = binary_continuous_read_after_filter(
+      path_helper::commit_remote_log(ctx),
+      |i: &Commit| i.id == after_id,
+    )?;
     Ok(remotes)
   }
   fn add_local_commit(
@@ -1258,14 +1271,27 @@ impl Repository {
     Ok(commit)
   }
   /// Start remote server
-  pub fn serve(&self) -> Result<(), String> {
-    match &self.repo_details.lock().unwrap().mode {
-      Mode::Server { port_number } => {}
+  pub fn serve(self) -> Result<(), String> {
+    let server_addr = match &self.repo_details.lock().unwrap().mode {
+      Mode::Server { server_addr } => server_addr.to_string(),
       _ => {
         panic!("Cannot start server, as the repository is not in server mode")
       }
-    }
-    unimplemented!()
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .worker_threads(1)
+      .thread_name("sync_server")
+      .build()
+      .unwrap();
+    runtime.block_on(async {
+      Server::builder()
+        .add_service(ApiServer::new(self))
+        .serve(server_addr.parse().unwrap())
+        .await
+        .expect("Error starting server");
+    });
+    Ok(())
   }
   // Private method to register
   // storage hooks
@@ -1292,5 +1318,11 @@ impl Repository {
   }
   pub fn remote_commits(&self) -> Result<Vec<Commit>, String> {
     CommitLog::load_remotes(&self.ctx())
+  }
+  pub fn remote_commits_after(
+    &self,
+    after_id: Uuid,
+  ) -> Result<Vec<Commit>, String> {
+    CommitLog::load_remotes_after(&self.ctx(), after_id)
   }
 }

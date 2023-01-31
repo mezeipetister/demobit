@@ -80,6 +80,36 @@ pub fn binary_continuous_read<T: for<'de> Deserialize<'de>>(
   Ok(res)
 }
 
+pub fn binary_continuous_read_after_filter<
+  T: for<'de> Deserialize<'de> + Clone,
+>(
+  path: PathBuf,
+  filter: impl Fn(&T) -> bool,
+) -> Result<Vec<T>, String> {
+  // Try open staging
+  let mut res: Vec<T> = Vec::new();
+  let mut f = std::fs::File::open(&path)
+    .map_err(|_| format!("No binary file found: {:?}", path))?;
+  f.seek(SeekFrom::Current(0)).unwrap();
+  let mut append = false;
+  loop {
+    match deserialize_from(&f) {
+      Ok(r) => match append {
+        true => res.push((r as T).to_owned()),
+        false => {
+          if filter(&r) {
+            append = true;
+          }
+        }
+      },
+      Err(_) => {
+        break;
+      }
+    }
+  }
+  Ok(res)
+}
+
 pub fn binary_update<T: Serialize + core::fmt::Debug>(
   path: PathBuf,
   data: T,

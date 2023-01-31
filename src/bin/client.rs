@@ -126,11 +126,17 @@ impl AppData {
 
 fn main() {
   // Init Demo Context
-  let ctx = Context::init(PathBuf::from("./data"), "mezeipetister".into());
+  let ctx =
+    Context::init(PathBuf::from("./data/client"), "mezeipetister".into());
 
   // Init repo
-  // let repo: Repository =
-  //   Repository::init(ctx.clone(), sync::Mode::Local).unwrap();
+  let repo: Repository = Repository::init(
+    ctx.clone(),
+    sync::Mode::Remote {
+      remote_url: "[::1]:50059".to_string(),
+    },
+  )
+  .unwrap();
 
   // return;
 
