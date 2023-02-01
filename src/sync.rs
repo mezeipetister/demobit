@@ -20,7 +20,9 @@ use crate::{
   },
   prelude::{path_helper, sha1_signature},
   server::sync_api::{
-    api_client::ApiClient, api_server::ApiServer, CommitObj, PullRequest,
+    api_client::ApiClient,
+    api_server::{Api, ApiServer},
+    CommitObj, PullRequest,
   },
 };
 
@@ -918,7 +920,7 @@ impl<'a> CommitContextGuard<'a> {
       temp_commit: Commit::new(uid, commit_comment.to_string()),
     }
   }
-  // Use only for server side merge request
+  // Use only for merge a given Commit to the local FS
   fn new_merge(repo: &'a Repository, temp_commit: Commit) -> Self {
     Self {
       ctx: repo.ctx.lock().unwrap(),
@@ -1156,8 +1158,10 @@ impl Repository {
     if Self::load(ctx.clone()).is_ok() {
       return Err("Existing repository. Cannot clone again".into());
     }
+
     unimplemented!()
   }
+
   /// Pull remote repository
   pub fn proceed_pull(&self) -> Result<(), String> {
     let remote_addr = match &self.repo_details.lock().unwrap().mode {
@@ -1174,15 +1178,20 @@ impl Repository {
       .build()
       .unwrap();
 
+    let ctx = self.ctx();
+
+    // Get last local remote commit id
+    let after_commit_id = CommitIndex::latest_remote_commit_id(&ctx)
+      .map(|i| i.to_string())
+      .unwrap_or("".to_string());
+
     runtime.block_on(async {
       let mut remote_client = ApiClient::connect(remote_addr)
         .await
         .expect("Could not connect to UPL service");
 
       let mut res = remote_client
-        .pull(PullRequest {
-          after_commit_id: "".to_string(),
-        })
+        .pull(PullRequest { after_commit_id })
         .await
         .unwrap()
         .into_inner();
@@ -1192,12 +1201,23 @@ impl Repository {
       while let Some(commit) = res.message().await.unwrap() {
         commits.push(commit);
       }
+
+      for commit_obj in commits {
+        let commit: Commit = serde_json::from_str(&commit_obj.obj_json_string)
+          .expect("Commit deser error");
+        let ctx = self.merge_commit_ctx(commit);
+        drop(ctx)
+      }
     });
 
     Ok(())
   }
   /// Push repository local commits to remote
   pub fn proceed_push(&self) -> Result<(), String> {
+    // Before push operation
+    // Proceed pull
+    self.proceed_pull()?;
+
     let remote_addr = match &self.repo_details.lock().unwrap().mode {
       Mode::Remote { remote_url } => remote_url.to_string(),
       _ => {
@@ -1229,14 +1249,18 @@ impl Repository {
       let mut commits = vec![];
 
       for commit in local_commits {
-        println!("commitobj to send {:?}", &commit);
+        info!("Sending commit obj");
         let mut commit = remote_client.push(commit).await.unwrap().into_inner();
-        println!("{:?}", &commit);
+        info!("Commit received back");
         commits.push(commit);
       }
 
-      println!("{:?}", commits);
+      info!("Pushed {} items", commits.len());
     });
+
+    // After push operation
+    // Proceed pull to update local storages
+    self.proceed_pull()?;
 
     Ok(())
   }
@@ -1390,6 +1414,9 @@ impl Repository {
     commit_comment: &str,
   ) -> CommitContextGuard<'a> {
     CommitContextGuard::new(self, commit_comment)
+  }
+  fn merge_commit_ctx<'a>(&'a self, commit: Commit) -> CommitContextGuard<'a> {
+    CommitContextGuard::new_merge(self, commit)
   }
   pub fn local_commits(&self) -> Result<Vec<Commit>, String> {
     CommitLog::load_locals(&self.ctx())

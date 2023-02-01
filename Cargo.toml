@@ -19,6 +19,8 @@ tokio = {version = "1.25.0", features = ["macros", "rt"]}
 tokio-stream = "0.1.11"
 tonic = {version = "0.8"}
 uuid = {version = "1.2.2", features = ["v4", "serde"]}
+log = "0.4"
+pretty_env_logger = "0.4"
 
 [build-dependencies]
 tonic-build = {version = "0.8"}

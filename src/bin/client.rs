@@ -125,6 +125,8 @@ impl AppData {
 }
 
 fn main() {
+  pretty_env_logger::init();
+
   // Init Demo Context
   let ctx =
     Context::init(PathBuf::from("./data/client"), "mezeipetister".into());
